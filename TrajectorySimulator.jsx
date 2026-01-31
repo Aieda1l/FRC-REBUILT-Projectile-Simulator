@@ -480,7 +480,7 @@ export default function TrajectorySimulator() {
         {/* Header */}
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
-            ⚡ FRC Trajectory Simulator
+            FRC Trajectory Simulator
           </h1>
           <p className="text-slate-400 text-sm mt-1">
             2026 Season • Air Drag & Magnus Effect Physics
@@ -492,7 +492,7 @@ export default function TrajectorySimulator() {
           <div className="lg:col-span-1 space-y-4">
             {/* Launch Parameters */}
             <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
-              <h2 className="text-lg font-semibold text-indigo-400 mb-3">🎯 Launch Parameters</h2>
+              <h2 className="text-lg font-semibold text-indigo-400 mb-3">Launch Parameters</h2>
               <Slider label="Distance (X)" value={launchX} onChange={setLaunchX} min={-5} max={-0.5} step={0.1} unit="m" />
               <Slider label="Height (Y)" value={launchY} onChange={setLaunchY} min={0.1} max={2} step={0.05} unit="m" />
               <Slider label="Velocity" value={velocity} onChange={setVelocity} min={5} max={25} step={0.5} unit="m/s" />
@@ -503,21 +503,21 @@ export default function TrajectorySimulator() {
                 onClick={handleFindOptimalAngle}
                 className="w-full mt-3 py-2 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg font-semibold hover:from-green-400 hover:to-emerald-400 transition-all"
               >
-                🎯 Find Optimal Angle
+                Find Optimal Angle
               </button>
               
               <button
                 onClick={handleFindOptimalVelocity}
                 className="w-full mt-2 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg font-semibold hover:from-blue-400 hover:to-cyan-400 transition-all"
               >
-                ⚡ Find Optimal Velocity
+                Find Optimal Velocity
               </button>
               
               <button
                 onClick={handleFindOptimalBoth}
                 className="w-full mt-2 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg font-semibold hover:from-purple-400 hover:to-pink-400 transition-all"
               >
-                🎯 Find Best V + Angle
+                Find Best V + Angle
               </button>
             </div>
             
@@ -527,7 +527,7 @@ export default function TrajectorySimulator() {
                 onClick={() => setShowEstimator(!showEstimator)}
                 className="w-full flex justify-between items-center text-lg font-semibold text-amber-400"
               >
-                <span>🔧 Backspin Estimator</span>
+                <span>Backspin Calculator</span>
                 <span>{showEstimator ? '▼' : '▶'}</span>
               </button>
               
@@ -562,7 +562,7 @@ export default function TrajectorySimulator() {
             
             {/* Physics Options */}
             <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
-              <h2 className="text-lg font-semibold text-indigo-400 mb-3">⚙️ Physics Options</h2>
+              <h2 className="text-lg font-semibold text-indigo-400 mb-3">Physics Options</h2>
               <Toggle label="Air Drag" checked={enableDrag} onChange={setEnableDrag} />
               <Toggle label="Magnus Effect (Backspin)" checked={enableMagnus} onChange={setEnableMagnus} />
               <Toggle label="Show Ideal (No Drag)" checked={showIdeal} onChange={setShowIdeal} />
@@ -578,7 +578,7 @@ export default function TrajectorySimulator() {
             
             {/* Results */}
             <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
-              <h2 className="text-lg font-semibold text-indigo-400 mb-3">📊 Results</h2>
+              <h2 className="text-lg font-semibold text-indigo-400 mb-3">Results</h2>
               <ResultItem 
                 label="Hit Target" 
                 value={result.hitTarget ? '✓ YES' : '✗ NO'} 
@@ -604,7 +604,7 @@ export default function TrajectorySimulator() {
           <div className="lg:col-span-2">
             <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-lg font-semibold text-indigo-400">📈 Trajectory</h2>
+                <h2 className="text-lg font-semibold text-indigo-400">Trajectory Graph</h2>
                 <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
                   result.hitTarget 
                     ? 'bg-green-500/20 text-green-400 border border-green-500/50' 
@@ -727,7 +727,7 @@ export default function TrajectorySimulator() {
             
             {/* Physics info */}
             <div className="mt-4 bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
-              <h2 className="text-lg font-semibold text-indigo-400 mb-2">🔬 Physics Effects</h2>
+              <h2 className="text-lg font-semibold text-indigo-400 mb-2">Physics Details</h2>
               <div className="grid md:grid-cols-2 gap-4 text-sm">
                 <div>
                   <div className="text-slate-400 mb-1">Air Drag Effect</div>
