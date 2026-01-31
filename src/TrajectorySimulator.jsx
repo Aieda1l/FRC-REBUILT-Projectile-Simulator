@@ -304,7 +304,7 @@ export default function TrajectorySimulator() {
     const [spinRPM, setSpinRPM] = useState(2000);
 
     // Backspin estimator parameters
-    const [flywheelDia, setFlywheelDia] = useState(4.0);
+    const [flywheelDia, setFlywheelDia] = useState(5.91);
     const [flywheelRPM, setFlywheelRPM] = useState(3500);
     const [ballDia, setBallDia] = useState(5.0);
     const [compression, setCompression] = useState(0.5);
