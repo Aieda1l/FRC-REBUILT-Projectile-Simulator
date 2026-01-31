@@ -553,7 +553,7 @@ export default function TrajectorySimulator() {
                   <p className="text-xs text-slate-400 mb-3">
                     For hooded single-flywheel shooters (like 254's 2017)
                   </p>
-                  <Slider label="Flywheel RPM" value={flywheelRPM} onChange={setFlywheelRPM} min={1000} max={6000} step={100} unit="RPM" />
+                  <Slider label="Flywheel RPM" value={flywheelRPM} onChange={setFlywheelRPM} min={1000} max={8000} step={100} unit="RPM" />
                   <Slider label="Flywheel Dia" value={flywheelDia} onChange={setFlywheelDia} min={2} max={8} step={0.5} unit="in" />
                   <Slider label="Ball Diameter" value={ballDia} onChange={setBallDia} min={3} max={10} step={0.5} unit="in" />
                   <Slider label="Compression" value={compression} onChange={setCompression} min={0.1} max={1.5} step={0.1} unit="in" />
