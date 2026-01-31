@@ -1,5 +1,5 @@
 # FRC Trajectory Simulator Dependencies
 # Install with: pip install -r requirements.txt
 
-numpy>=1.21.0
-matplotlib>=3.5.0
+numpy
+matplotlib
