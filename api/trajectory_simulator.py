@@ -44,7 +44,7 @@ class GamePieceProperties:
             GamePiece.FUEL: cls(
                 name="Coral (2026)",
                 mass=0.227,  # ~0.5 lb
-                radius=0.15,  # ~4 inch radius
+                radius=0.15,  # 15 cm radius
                 drag_coefficient=0.47,  # sphere-like
                 lift_coefficient=0.25,
                 moment_of_inertia=0.00097  # solid sphere approximation
@@ -1051,13 +1051,13 @@ if __name__ == "__main__":
     simulator = TrajectorySimulator(physics, dt=0.001)
     optimizer = TrajectoryOptimizer(simulator)
 
-    # Define target (based on Desmos values, converted to meters)
+    # Define target
     target = Target(
-        name="Hub",
-        position=(0, 2.64),  # ~8.5 ft height
-        entry_radius=0.61,  # ~24 inch diameter opening
-        funnel_radius=1.07,  # ~42 inch outer funnel
-        height_at_funnel=2.89  # ~9.5 ft at outer edge
+        name="Hub (2026 REBUILT)",
+        position=(0, 1.828),  # 72 inches height
+        entry_radius=0.302,  # 11.9 inch radius (inner hole)
+        funnel_radius=0.529,  # 20.85 inch radius (outer funnel)
+        height_at_funnel=1.828  # Simplified for top-down entry
     )
 
     # Test launch with estimated backspin

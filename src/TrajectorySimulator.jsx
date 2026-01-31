@@ -247,9 +247,18 @@ const findOptimalBoth = (params, minV = 5, maxV = 25) => {
 // Slider component
 const Slider = ({ label, value, onChange, min, max, step, unit }) => (
   <div className="mb-3">
-    <div className="flex justify-between text-sm mb-1">
+    <div className="flex justify-between items-center text-sm mb-1">
       <span className="text-slate-300">{label}</span>
-      <span className="text-cyan-400 font-mono">{value.toFixed(step < 1 ? 1 : 0)} {unit}</span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          value={value}
+          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+          className="w-20 bg-slate-700 text-cyan-400 font-mono text-right rounded px-1 border border-slate-600 focus:outline-none focus:border-indigo-500"
+          step={step}
+        />
+        <span className="text-slate-500 text-xs w-4">{unit}</span>
+      </div>
     </div>
     <input
       type="range"
@@ -309,15 +318,15 @@ export default function TrajectorySimulator() {
   const [velError, setVelError] = useState(0.5);
   const [angleError, setAngleError] = useState(1.0);
   
-  // Target (FRC 2026 Hub estimated)
+  // Target
   const targetX = 0;
-  const targetY = 2.64;
-  const targetRadius = 0.61;
-  const funnelRadius = 1.07;
+  const targetY = 1.828;      // 72 inches (Front edge of opening)
+  const targetRadius = 0.302; // 11.9 inch radius (from Desmos 23.8" hole)
+  const funnelRadius = 0.529; // 20.85 inch radius (from Manual 41.7" funnel)
   
-  // Game piece (Coral 2026)
-  const mass = 0.235;
-  const radius = 0.1016;
+  // Game piece (Fuel 2026)
+  const mass = 0.227;
+  const radius = 0.15;
   const dragCoeff = 0.47;
   const liftCoeff = 0.25;
   const airDensity = 1.225;
@@ -737,7 +746,7 @@ export default function TrajectorySimulator() {
                 </div>
                 <div className="bg-slate-700/50 rounded p-2">
                   <div className="text-slate-400">Game Piece</div>
-                  <div className="text-cyan-400 font-mono">Coral 2026</div>
+                  <div className="text-cyan-400 font-mono">Fuel 2026</div>
                 </div>
               </div>
             </div>
