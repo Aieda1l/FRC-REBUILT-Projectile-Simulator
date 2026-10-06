@@ -36,7 +36,7 @@ This project is structured as a modern full-stack application designed for Verce
 ```text
 frc-simulator/
 ├── api/                   # Python Backend (FastAPI) & Physics Engine
-│   ├── index.py           # API Entry point
+│   ├── main.py            # API entry point
 │   └── trajectory_simulator.py  # Core physics logic
 ├── src/                   # Frontend (React + Vite)
 │   ├── components/
@@ -127,7 +127,7 @@ from api.trajectory_simulator import (
 )
 
 # Setup
-piece = GamePieceProperties.from_game_piece(GamePiece.CORAL)
+piece = GamePieceProperties.from_game_piece(GamePiece.FUEL)
 env = EnvironmentConditions()
 physics = PhysicsEngine(piece, env)
 sim = TrajectorySimulator(physics)
@@ -152,7 +152,7 @@ print(f"Hit Target: {result.hit_target}")
 2. **Error Envelopes**: Don't just find the perfect angle. Turn on the "Error Envelope" to see if a +/- 2° variance
    causes a miss. A robust shot is better than a perfect theoretical shot.
 3. **Ideal vs. Real**: Toggle "Show Ideal" to see how much gravity-only physics differs from the drag+lift model. This
-   helps explain why standard kinematic equations fail for light game pieces like the 2024 Note or 2026 Coral.
+   helps explain why standard kinematic equations fail for light game pieces like the 2024 Note or 2026 Fuel.
 
 ## License
 
