@@ -17,7 +17,7 @@ class SimRequest(BaseModel):
 @app.post("/api/simulate")
 async def simulate(data: SimRequest):
     # Reuse your existing classes
-    piece = GamePieceProperties.from_game_piece(GamePiece.CORAL)
+    piece = GamePieceProperties.from_game_piece(GamePiece.FUEL)
     env = EnvironmentConditions()
     physics = PhysicsEngine(piece, env)
     sim = TrajectorySimulator(physics)
