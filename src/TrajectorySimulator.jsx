@@ -328,7 +328,8 @@ export default function TrajectorySimulator() {
 
     // Game piece (Fuel 2026)
     const mass = 0.227;
-    const radius = 0.15;
+    const diameter = 0.15;
+    const radius = diameter / 2;
     const dragCoeff = 0.47;
     const liftCoeff = 0.25;
     const airDensity = 1.225;
