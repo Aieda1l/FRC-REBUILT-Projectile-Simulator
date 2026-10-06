@@ -42,12 +42,12 @@ class GamePieceProperties:
         """Get properties for standard FRC game pieces."""
         properties = {
             GamePiece.FUEL: cls(
-                name="Coral (2026)",
+                name="Fuel (2026)",
                 mass=0.227,  # ~0.5 lb
-                radius=0.15,  # 15 cm radius
+                radius=0.075,  # 0.15 m diameter / 2
                 drag_coefficient=0.47,  # sphere-like
                 lift_coefficient=0.25,
-                moment_of_inertia=0.00097  # solid sphere approximation
+                moment_of_inertia=0.00051  # solid sphere approximation (2/5 * m * r^2)
             ),
             GamePiece.NOTE_2024: cls(
                 name="Note (2024)",
@@ -1006,11 +1006,11 @@ if __name__ == "__main__":
 
     # Example 2: Generic single flywheel shooter for 2026
     print("\n--- Generic Single Flywheel (2026 estimate) ---")
-    # Assuming Coral is ~8" diameter
+    # Assuming Fuel is ~8" diameter
     shooter_2026 = ShooterConfig.create_single_flywheel(
         flywheel_diameter=4.0,
         flywheel_rpm=4000,
-        ball_diameter=8.0,  # Estimated Coral size
+        ball_diameter=8.0,  # Estimated Fuel size
         compression=0.75
     )
     backspin_2026 = shooter_2026.estimate_backspin_rpm()
