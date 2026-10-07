@@ -49,6 +49,7 @@ export function simulateShot(params, options = {}) {
     gravity,
     enableDrag,
     enableMagnus,
+    enableBuoyancy = true,
     targetX = 0,
     targetLateralY = 0,
     robotVelocity = [0, 0, 0],
@@ -87,6 +88,7 @@ export function simulateShot(params, options = {}) {
     ...(dynamicViscosity === undefined ? {} : {dynamicViscosity}),
     enableDrag,
     enableMagnus,
+    enableBuoyancy,
   };
 
   const samples3d = integrateTrajectory(initial, flightParams, {

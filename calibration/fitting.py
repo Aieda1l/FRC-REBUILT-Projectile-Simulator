@@ -136,6 +136,7 @@ def _base_kwargs(base_params: Any) -> Dict[str, Any]:
             "wind": base_params.wind,
             "enable_drag": base_params.enable_drag,
             "enable_magnus": base_params.enable_magnus,
+            "enable_buoyancy": base_params.enable_buoyancy,
             "spin_decay_time_constant": base_params.spin_decay_time_constant,
         }
     if not isinstance(base_params, dict):

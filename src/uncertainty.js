@@ -71,6 +71,12 @@ function scaleDragModel(model, factor) {
   if (model.kind === 'table1d') {
     return {...model, coefficients: model.coefficients.map((value) => value * factor)};
   }
+  if (model.kind === 'table2d') {
+    return {
+      ...model,
+      coefficients: model.coefficients.map((row) => row.map((value) => value * factor)),
+    };
+  }
   throw new RangeError(`cannot scale drag model kind: ${model.kind}`);
 }
 
