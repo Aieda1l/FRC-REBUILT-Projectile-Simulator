@@ -169,3 +169,32 @@ test('robust optimizer revalidates winner at fine dt and full sample count', () 
   }
   assert.ok(result.monteCarloEvaluations <= 12);
 });
+
+
+test('combined optimizer compensates large lateral robot velocity with a nonzero azimuth', () => {
+  const params = baseParams({
+    launchX: -3,
+    launchY: 0.5,
+    velocity: 12,
+    angleDeg: 40,
+    robotVelocity: [0, 10, 0],
+  });
+  const result = optimizeBoth(params);
+  assert.ok(result.solution, 'expected a clean-entry solution with lateral lead');
+  assert.equal(result.solution.result.hubInteraction.classification, 'clean-entry');
+  assert.ok(Math.abs(result.solution.azimuth) > 1);
+  assert.ok(Math.abs(result.solution.result.hubInteraction.topCrossing.state[1]) < 0.5);
+});
+
+test('velocity-only optimizer explains infeasible lateral compensation at fixed steep elevation', () => {
+  const params = baseParams({
+    launchX: -3,
+    launchY: 0.5,
+    velocity: 8.8,
+    angleDeg: 75,
+    robotVelocity: [0, 10, 0],
+  });
+  const result = optimizeVelocity(params);
+  assert.equal(result.solution, null);
+  assert.equal(result.reason, 'lateral-compensation-infeasible');
+});

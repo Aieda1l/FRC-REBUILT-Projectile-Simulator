@@ -135,3 +135,12 @@ test('robust uncertainty UI exposes forward and lateral robot velocity sigma', a
   assert.match(simulator, /robotVelocity:\s*\[/);
   assert.match(simulator, /kind:\s*['"]normal['"][^\n]*mean:\s*0[^\n]*sigma:/);
 });
+
+
+test('optimized lateral lead is persisted and infeasible velocity-only motion gets a specific message', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /azimuthDeg/);
+  assert.match(source, /setAzimuth/);
+  assert.match(source, /lateral-compensation-infeasible/);
+  assert.match(source, /Best V \+ Angle/);
+});
