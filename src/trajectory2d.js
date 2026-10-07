@@ -1,5 +1,5 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
-import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
+import {scoreTrajectory} from './scoring.js';
 import {summarizeCalibrationDomain} from './calibration.js';
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -38,6 +38,7 @@ export function simulateShot(params, options = {}) {
     spinRPM,
     mass,
     radius,
+    collisionRadius = radius,
     dragCoeff,
     liftCoeff,
     airDensity,
@@ -52,6 +53,8 @@ export function simulateShot(params, options = {}) {
     enableBuoyancy = true,
     targetX = 0,
     targetLateralY = 0,
+    scoringTarget = null,
+    scoringContext = {},
     robotVelocity = [0, 0, 0],
     wind = [0, 0, 0],
   } = params;
@@ -103,22 +106,30 @@ export function simulateShot(params, options = {}) {
     ? summarizeCalibrationDomain(samples3d, flightParams, calibrationProfile)
     : null;
 
-  const hubGeometry = createHubGeometry({
+  const resolvedScoringTarget = scoringTarget ?? {
+    kind: '2026-hex-hub',
     centerX: targetX,
     centerY: targetLateralY,
-  });
-  const hubInteraction = classifyHubInteraction(samples3d, hubGeometry, radius);
-  const hitTarget = hubInteraction.classification === 'clean-entry';
+  };
+  const scoringInteraction = scoreTrajectory(
+    samples3d,
+    resolvedScoringTarget,
+    {radius, collisionRadius},
+    scoringContext,
+  );
+  const hitTarget = scoringInteraction.isScore;
 
   const final = samples3d.at(-1);
   const points = projectSamples(samples3d);
   const maxHeight = Math.max(...samples3d.map((sample) => sample.state[2]));
 
   let impactSample = final;
-  if (hubInteraction.collisionPoint) {
-    impactSample = hubInteraction.collisionPoint;
-  } else if (hubInteraction.topCrossing) {
-    impactSample = hubInteraction.topCrossing;
+  if (scoringInteraction.collisionPoint) {
+    impactSample = scoringInteraction.collisionPoint;
+  } else if (scoringInteraction.entrySample) {
+    impactSample = scoringInteraction.entrySample;
+  } else if (scoringInteraction.topCrossing) {
+    impactSample = scoringInteraction.topCrossing;
   }
 
   const impactPoint = {
@@ -128,8 +139,9 @@ export function simulateShot(params, options = {}) {
 
   let entryVelocity = null;
   let entryAngle = null;
-  if (hitTarget && hubInteraction.topCrossing) {
-    const state = hubInteraction.topCrossing.state;
+  const entrySample = scoringInteraction.entrySample ?? scoringInteraction.topCrossing;
+  if (hitTarget && entrySample) {
+    const state = entrySample.state;
     entryVelocity = Math.hypot(state[3], state[4], state[5]);
     entryAngle = Math.atan2(
       state[5],
@@ -137,13 +149,23 @@ export function simulateShot(params, options = {}) {
     ) * RAD_TO_DEG;
   }
 
+  const hubGeometry = resolvedScoringTarget.kind === '2026-hex-hub'
+    ? scoringInteraction.geometry
+    : null;
+
   return {
     samples3d,
     points,
     calibrationDiagnostics,
+    scoringTarget: resolvedScoringTarget,
+    scoringGeometry: scoringInteraction.geometry,
+    scoringInteraction,
+    // Deprecated compatibility aliases. Existing 2026 UI/optimizer consumers can
+    // migrate independently without changing current behavior.
     hubGeometry,
-    hubInteraction,
+    hubInteraction: scoringInteraction,
     hitTarget,
+    score: scoringInteraction.points,
     impactPoint,
     flightTime: final.time,
     maxHeight,
