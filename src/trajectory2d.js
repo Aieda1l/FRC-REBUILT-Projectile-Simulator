@@ -1,4 +1,5 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
+import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -26,7 +27,7 @@ function projectSamples(samples) {
   return projected;
 }
 
-export function simulateTrajectory2D(params) {
+export function simulateShot(params, options = {}) {
   const {
     launchX,
     launchY,
@@ -41,9 +42,8 @@ export function simulateTrajectory2D(params) {
     gravity,
     enableDrag,
     enableMagnus,
-    targetX,
-    targetY,
-    targetRadius,
+    targetX = 0,
+    targetLateralY = 0,
   } = params;
 
   const angle = angleDeg * DEG_TO_RAD;
@@ -63,65 +63,54 @@ export function simulateTrajectory2D(params) {
     enableDrag,
     enableMagnus,
   };
-  const options = {method: 'rk4', dt: 0.001, maxTime: 5};
 
-  const groundSamples = integrateTrajectory(initial, flightParams, {
-    ...options,
+  const samples3d = integrateTrajectory(initial, flightParams, {
+    method: options.method ?? 'rk4',
+    dt: options.dt ?? 0.001,
+    maxTime: options.maxTime ?? 5,
     terminalHeight: 0,
     terminalDirection: -1,
   });
 
-  let hitTarget = false;
-  let targetCrossing = null;
-  if (
-    Number.isFinite(targetX)
-    && Number.isFinite(targetY)
-    && Number.isFinite(targetRadius)
-  ) {
-    const targetSamples = integrateTrajectory(initial, flightParams, {
-      ...options,
-      terminalHeight: targetY,
-      terminalDirection: -1,
-    });
-    const crossing = targetSamples.at(-1);
-    if (
-      crossing
-      && Math.abs(crossing.state[2] - targetY) <= 1e-9
-      && crossing.state[5] < 0
-    ) {
-      const horizontalError = Math.hypot(
-        crossing.state[0] - targetX,
-        crossing.state[1],
-      );
-      if (horizontalError <= targetRadius) {
-        hitTarget = true;
-        targetCrossing = crossing;
-      }
-    }
+  const hubGeometry = createHubGeometry({
+    centerX: targetX,
+    centerY: targetLateralY,
+  });
+  const hubInteraction = classifyHubInteraction(samples3d, hubGeometry, radius);
+  const hitTarget = hubInteraction.classification === 'clean-entry';
+
+  const final = samples3d.at(-1);
+  const points = projectSamples(samples3d);
+  const maxHeight = Math.max(...samples3d.map((sample) => sample.state[2]));
+
+  let impactSample = final;
+  if (hubInteraction.collisionPoint) {
+    impactSample = hubInteraction.collisionPoint;
+  } else if (hubInteraction.topCrossing) {
+    impactSample = hubInteraction.topCrossing;
   }
 
-  const final = groundSamples.at(-1);
-  const points = projectSamples(groundSamples);
-  const maxHeight = Math.max(...groundSamples.map((sample) => sample.state[2]));
+  const impactPoint = {
+    x: impactSample.state[0],
+    y: impactSample.state[2],
+  };
 
-  let impactPoint = {x: final.state[0], y: Math.max(0, final.state[2])};
   let entryVelocity = null;
   let entryAngle = null;
-  if (targetCrossing) {
-    impactPoint = {x: targetCrossing.state[0], y: targetY};
-    entryVelocity = Math.hypot(
-      targetCrossing.state[3],
-      targetCrossing.state[4],
-      targetCrossing.state[5],
-    );
+  if (hitTarget && hubInteraction.topCrossing) {
+    const state = hubInteraction.topCrossing.state;
+    entryVelocity = Math.hypot(state[3], state[4], state[5]);
     entryAngle = Math.atan2(
-      targetCrossing.state[5],
-      Math.hypot(targetCrossing.state[3], targetCrossing.state[4]),
+      state[5],
+      Math.hypot(state[3], state[4]),
     ) * RAD_TO_DEG;
   }
 
   return {
+    samples3d,
     points,
+    hubGeometry,
+    hubInteraction,
     hitTarget,
     impactPoint,
     flightTime: final.time,
@@ -130,4 +119,8 @@ export function simulateTrajectory2D(params) {
     entryVelocity,
     entryAngle,
   };
+}
+
+export function simulateTrajectory2D(params, options = {}) {
+  return simulateShot(params, options);
 }

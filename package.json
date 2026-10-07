@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:physics": "node --test tests/physics3d_js.test.mjs"
+    "test:physics": "node --test tests/*_js.test.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.1.18",

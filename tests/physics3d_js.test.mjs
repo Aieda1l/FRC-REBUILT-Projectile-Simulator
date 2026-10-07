@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { simulateTrajectory2D } from '../src/trajectory2d.js';
+import { simulateShot, simulateTrajectory2D } from '../src/trajectory2d.js';
+import { HUB_DIMENSIONS } from '../src/hubGeometry.js';
 
 import {
   IntegrationError,
@@ -167,6 +168,24 @@ function baseParams(overrides = {}) {
   };
 }
 
+
+function vacuumShotThroughTopAt(xCross) {
+  const launchX = -3;
+  const launchY = 0.5;
+  const vx = 2;
+  const t = (xCross - launchX) / vx;
+  const vz = (HUB_DIMENSIONS.topZ - launchY + 0.5 * 9.81 * t * t) / t;
+  return baseParams({
+    launchX,
+    launchY,
+    velocity: Math.hypot(vx, vz),
+    angleDeg: Math.atan2(vz, vx) * 180 / Math.PI,
+    enableDrag: false,
+    enableMagnus: false,
+    targetX: 0,
+  });
+}
+
 function crossingX(verticalVelocity, launchHeight, targetHeight, horizontalVelocity, descending) {
   const a = 0.5 * 9.81;
   const b = -verticalVelocity;
@@ -213,19 +232,32 @@ test('ascending target-height crossing is ignored', () => {
   assert.equal(result.hitTarget, false);
 });
 
-test('target entry uses interpolated descending crossing clearance', () => {
-  const vx = 2;
-  const vz = 5;
-  const result = simulateTrajectory2D(baseParams({
-    launchX: 0,
-    launchY: 0.5,
-    velocity: Math.hypot(vx, vz),
-    angleDeg: Math.atan2(vz, vx) * 180 / Math.PI,
-    enableDrag: false,
-    enableMagnus: false,
-    targetX: crossingX(vz, 0.5, 1.0, vx, true),
-    targetY: 1.0,
-    targetRadius: 0.05,
-  }));
-  assert.equal(result.hitTarget, true);
+test('simulateShot returns canonical 3-D samples and x/z projection from the same flight', () => {
+  const result = simulateShot(vacuumShotThroughTopAt(-0.30), {dt: 0.002});
+  assert.ok(result.samples3d.length > 2);
+  assert.ok(result.points.length > 2);
+  assert.equal(result.points[0].x, result.samples3d[0].state[0]);
+  assert.equal(result.points[0].y, result.samples3d[0].state[2]);
+  assert.ok(result.hubInteraction);
 });
+
+test('hitTarget is true only for clean entry', () => {
+  const clean = simulateShot(vacuumShotThroughTopAt(-0.30));
+  assert.equal(clean.hubInteraction.classification, 'clean-entry');
+  assert.equal(clean.hitTarget, true);
+
+  const collision = simulateShot(vacuumShotThroughTopAt(0.42));
+  assert.equal(collision.hubInteraction.classification, 'funnel-collision');
+  assert.equal(collision.hitTarget, false);
+});
+
+test('optimizer dt override uses fewer samples without changing the UI default', () => {
+  const params = vacuumShotThroughTopAt(-0.30);
+  const fine = simulateShot(params, {dt: 0.001});
+  const coarse = simulateShot(params, {dt: 0.005});
+  const uiDefault = simulateTrajectory2D(params);
+  assert.ok(coarse.samples3d.length < fine.samples3d.length);
+  assert.equal(uiDefault.samples3d.length, fine.samples3d.length);
+  assert.ok(Math.abs(uiDefault.samples3d[1].time - 0.001) < 1e-12);
+});
+

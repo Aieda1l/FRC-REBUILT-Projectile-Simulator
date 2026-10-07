@@ -1,5 +1,9 @@
 import React, {useState, useEffect, useCallback, useMemo} from 'react';
 import {simulateTrajectory2D} from './trajectory2d.js';
+import Toggle from './Toggle.jsx';
+import {createOptimizerClient} from './optimizerClient.js';
+import Trajectory3DView from './Trajectory3DView.jsx';
+import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
 
 // Physics constants and utilities
 const DEG_TO_RAD = Math.PI / 180;
@@ -57,94 +61,6 @@ const computeIdealAngle = (launchX, launchY, targetX, targetY, velocity, gravity
     return angle1 < angle2 ? angle1 : angle2;
 };
 
-// Find optimal angle with drag
-const findOptimalAngle = (params) => {
-    let bestAngle = null;
-    let bestError = Infinity;
-
-    for (let angle = 5; angle <= 85; angle += 0.5) {
-        const result = simulateTrajectory({...params, angleDeg: angle});
-        if (result.impactPoint) {
-            const error = Math.abs(result.impactPoint.x - params.targetX);
-            if (result.impactPoint.y >= params.targetY - 0.1 && error < bestError) {
-                bestError = error;
-                bestAngle = angle;
-            }
-        }
-    }
-
-    // Refine with finer search
-    if (bestAngle !== null) {
-        for (let angle = bestAngle - 2; angle <= bestAngle + 2; angle += 0.1) {
-            const result = simulateTrajectory({...params, angleDeg: angle});
-            if (result.impactPoint) {
-                const error = Math.abs(result.impactPoint.x - params.targetX);
-                if (result.hitTarget && error < bestError) {
-                    bestError = error;
-                    bestAngle = angle;
-                }
-            }
-        }
-    }
-
-    return bestAngle;
-};
-
-// Find optimal velocity for a given angle
-const findOptimalVelocity = (params, minV = 5, maxV = 25) => {
-    let bestVel = null;
-    let bestError = Infinity;
-
-    // Coarse search
-    for (let v = minV; v <= maxV; v += 0.5) {
-        const result = simulateTrajectory({...params, velocity: v});
-        if (result.hitTarget) {
-            const error = Math.abs(result.impactPoint.x - params.targetX);
-            if (error < bestError) {
-                bestError = error;
-                bestVel = v;
-            }
-        }
-    }
-
-    // Refine
-    if (bestVel !== null) {
-        for (let v = bestVel - 1; v <= bestVel + 1; v += 0.1) {
-            const result = simulateTrajectory({...params, velocity: v});
-            if (result.hitTarget) {
-                const error = Math.abs(result.impactPoint.x - params.targetX);
-                if (error < bestError) {
-                    bestError = error;
-                    bestVel = v;
-                }
-            }
-        }
-    }
-
-    return bestVel;
-};
-
-// Find optimal velocity AND angle
-const findOptimalBoth = (params, minV = 5, maxV = 25) => {
-    let best = null;
-    let bestError = Infinity;
-
-    for (let v = minV; v <= maxV; v += 0.5) {
-        for (let a = 20; a <= 80; a += 1) {
-            const result = simulateTrajectory({...params, velocity: v, angleDeg: a});
-            if (result.hitTarget) {
-                const error = Math.abs(result.impactPoint.x - params.targetX);
-                if (error < bestError) {
-                    bestError = error;
-                    best = {velocity: v, angle: a, result};
-                }
-            }
-        }
-    }
-
-    return best;
-};
-
 // Slider component
 const Slider = ({label, value, onChange, min, max, step, unit}) => (
     <div className="mb-3">
@@ -172,17 +88,6 @@ const Slider = ({label, value, onChange, min, max, step, unit}) => (
             className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
         />
     </div>
-);
-
-// Toggle component
-const Toggle = ({label, checked, onChange}) => (
-    <label className="flex items-center gap-2 cursor-pointer mb-2">
-        <div className={`w-10 h-5 rounded-full transition-colors ${checked ? 'bg-indigo-500' : 'bg-slate-600'}`}>
-            <div
-                className={`w-4 h-4 bg-white rounded-full transform transition-transform mt-0.5 ${checked ? 'translate-x-5 ml-0.5' : 'translate-x-0.5'}`}/>
-        </div>
-        <span className="text-sm text-slate-300">{label}</span>
-    </label>
 );
 
 // Result display component
@@ -217,16 +122,23 @@ export default function TrajectorySimulator() {
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
 
+    // Optimizer status
+    const [optimizerRunning, setOptimizerRunning] = useState(false);
+    const [optimizerProgress, setOptimizerProgress] = useState(null);
+    const [optimizerStatus, setOptimizerStatus] = useState('');
+    const [viewMode, setViewMode] = useState('2d');
+
     // Error margins
     const [velError, setVelError] = useState(0.5);
     const [angleError, setAngleError] = useState(1.0);
 
-    // Target
+    // HUB target geometry comes from the shared official-dimension model.
     const targetX = 0;
-    const targetY = 1.828;      // 72 inches (front edge of opening)
-    const funnelRadius = 0.529; // 20.85 inch apothem from the 41.7 in across-flats opening
-    // Approximate admissible FUEL-center half-width at the opening plane.
-    const targetRadius = 0.454; // 0.529 m opening apothem - 0.075 m FUEL radius
+    const targetY = HUB_DIMENSIONS.topZ;
+    const hubGeometry = useMemo(
+        () => createHubGeometry({centerX: targetX, centerY: 0}),
+        [targetX]
+    );
 
     // Game piece (FUEL 2026)
     // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
@@ -261,10 +173,35 @@ export default function TrajectorySimulator() {
         launchX, launchY, velocity, angleDeg: angle, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
-        targetX, targetY, targetRadius
+        targetX
     }), [launchX, launchY, velocity, angle, spinRPM, enableDrag, enableMagnus]);
 
     // Run simulation
+    const optimizerClient = useMemo(() => createOptimizerClient({
+        onProgress: (progress) => {
+            setOptimizerProgress(progress);
+        },
+        onComplete: (optimization) => {
+            setOptimizerRunning(false);
+            setOptimizerProgress(null);
+            if (optimization.solution) {
+                setVelocity(Math.round(optimization.solution.velocity * 10) / 10);
+                setAngle(Math.round(optimization.solution.angle * 10) / 10);
+                setOptimizerStatus('Clean entry found');
+            } else {
+                const near = optimization.bestNearMiss?.result?.hubInteraction?.classification;
+                setOptimizerStatus(near ? `No clean entry found (best: ${near})` : 'No clean entry found');
+            }
+        },
+        onError: (message) => {
+            setOptimizerRunning(false);
+            setOptimizerProgress(null);
+            setOptimizerStatus(`Optimization error: ${message}`);
+        },
+    }), []);
+
+    useEffect(() => () => optimizerClient.dispose(), [optimizerClient]);
+
     const result = useMemo(() => simulateTrajectory(params), [params]);
 
     // Ideal trajectory (no drag)
@@ -309,30 +246,19 @@ export default function TrajectorySimulator() {
         [flywheelDia, flywheelRPM]
     );
 
-    // Find optimal handler
-    const handleFindOptimalAngle = useCallback(() => {
-        const optimal = findOptimalAngle(params);
-        if (optimal !== null) {
-            setAngle(Math.round(optimal * 10) / 10);
-        }
-    }, [params]);
+    const startOptimization = useCallback((mode) => {
+        setOptimizerRunning(true);
+        setOptimizerProgress({evaluatedCandidates: 0, totalCandidates: mode === 'both' ? 980 : mode === 'angle' ? 160 : 100});
+        setOptimizerStatus('');
+        optimizerClient.start(mode, params);
+    }, [optimizerClient, params]);
 
-    // Find optimal velocity handler
-    const handleFindOptimalVelocity = useCallback(() => {
-        const optimal = findOptimalVelocity(params);
-        if (optimal !== null) {
-            setVelocity(Math.round(optimal * 10) / 10);
-        }
-    }, [params]);
-
-    // Find optimal both handler
-    const handleFindOptimalBoth = useCallback(() => {
-        const optimal = findOptimalBoth(params);
-        if (optimal !== null) {
-            setVelocity(Math.round(optimal.velocity * 10) / 10);
-            setAngle(Math.round(optimal.angle * 10) / 10);
-        }
-    }, [params]);
+    const cancelOptimization = useCallback(() => {
+        optimizerClient.cancel();
+        setOptimizerRunning(false);
+        setOptimizerProgress(null);
+        setOptimizerStatus('Optimization cancelled');
+    }, [optimizerClient]);
 
     // Apply estimated backspin
     const handleApplyEstimatedSpin = useCallback(() => {
@@ -394,15 +320,23 @@ export default function TrajectorySimulator() {
         );
     }, [envelopeResults, toSVG]);
 
-    // Target visualization points
-    const targetVis = useMemo(() => {
-        const center = toSVG(targetX, targetY);
-        const funnelLeft = toSVG(targetX - funnelRadius, targetY + 0.25);
-        const funnelRight = toSVG(targetX + funnelRadius, targetY + 0.25);
-        const entryLeft = toSVG(targetX - targetRadius, targetY);
-        const entryRight = toSVG(targetX + targetRadius, targetY);
-        return {center, funnelLeft, funnelRight, entryLeft, entryRight};
-    }, [toSVG]);
+    // 2-D HUB profile uses the same shared geometry as collision scoring and the 3-D view.
+    const targetVis = useMemo(() => ({
+        center: toSVG(hubGeometry.centerX, hubGeometry.topZ),
+        topLeft: toSVG(hubGeometry.centerX - hubGeometry.topApothem, hubGeometry.topZ),
+        topRight: toSVG(hubGeometry.centerX + hubGeometry.topApothem, hubGeometry.topZ),
+        bottomLeft: toSVG(hubGeometry.centerX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
+        bottomRight: toSVG(hubGeometry.centerX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
+    }), [toSVG, hubGeometry]);
+
+    const classification = result.hubInteraction?.classification ?? 'miss';
+    const classificationLabel = {
+        'clean-entry': 'CLEAN ENTRY',
+        'rim-collision': 'RIM COLLISION',
+        'funnel-collision': 'FUNNEL COLLISION',
+        miss: 'MISS',
+    }[classification] ?? 'MISS';
+    const cleanEntry = classification === 'clean-entry';
 
     const launchVis = useMemo(() => toSVG(launchX, launchY), [toSVG, launchX, launchY]);
     const impactVis = useMemo(() => result.impactPoint ? toSVG(result.impactPoint.x, result.impactPoint.y) : null, [toSVG, result]);
@@ -438,25 +372,61 @@ export default function TrajectorySimulator() {
                                     unit="RPM"/>
 
                             <button
-                                onClick={handleFindOptimalAngle}
+                                onClick={() => startOptimization('angle')}
+                                disabled={optimizerRunning}
                                 className="w-full mt-3 py-2 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg font-semibold hover:from-green-400 hover:to-emerald-400 transition-all"
                             >
                                 Find Optimal Angle
                             </button>
 
                             <button
-                                onClick={handleFindOptimalVelocity}
+                                onClick={() => startOptimization('velocity')}
+                                disabled={optimizerRunning}
                                 className="w-full mt-2 py-2 bg-gradient-to-r from-blue-500 to-cyan-500 rounded-lg font-semibold hover:from-blue-400 hover:to-cyan-400 transition-all"
                             >
                                 Find Optimal Velocity
                             </button>
 
                             <button
-                                onClick={handleFindOptimalBoth}
+                                onClick={() => startOptimization('both')}
+                                disabled={optimizerRunning}
                                 className="w-full mt-2 py-2 bg-gradient-to-r from-purple-500 to-pink-500 rounded-lg font-semibold hover:from-purple-400 hover:to-pink-400 transition-all"
                             >
                                 Find Best V + Angle
                             </button>
+
+                            {optimizerRunning && (
+                                <div className="mt-3 rounded-lg border border-slate-600 bg-slate-900/50 p-3">
+                                    <div className="flex justify-between text-xs text-slate-300 mb-2">
+                                        <span>Optimizing…</span>
+                                        <span>
+                                            {optimizerProgress
+                                                ? `${Math.min(100, Math.round((optimizerProgress.evaluatedCandidates / Math.max(1, optimizerProgress.totalCandidates)) * 100))}%`
+                                                : '0%'}
+                                        </span>
+                                    </div>
+                                    <div className="h-2 rounded bg-slate-700 overflow-hidden">
+                                        <div
+                                            className="h-full bg-cyan-400 transition-[width]"
+                                            style={{
+                                                width: optimizerProgress
+                                                    ? `${Math.min(100, (optimizerProgress.evaluatedCandidates / Math.max(1, optimizerProgress.totalCandidates)) * 100)}%`
+                                                    : '0%',
+                                            }}
+                                        />
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={cancelOptimization}
+                                        className="w-full mt-3 py-2 rounded-lg border border-red-500/60 text-red-300 hover:bg-red-500/10"
+                                    >
+                                        Cancel Optimization
+                                    </button>
+                                </div>
+                            )}
+                            {!optimizerRunning && optimizerStatus && (
+                                <p className="mt-3 text-xs text-slate-300" role="status">{optimizerStatus}</p>
+                            )}
                         </div>
 
                         {/* Backspin Estimator */}
@@ -526,10 +496,10 @@ export default function TrajectorySimulator() {
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
                             <h2 className="text-lg font-semibold text-indigo-400 mb-3">Results</h2>
                             <ResultItem
-                                label="Hit Target"
-                                value={result.hitTarget ? '✓ YES' : '✗ NO'}
+                                label="HUB Result"
+                                value={classificationLabel}
                                 unit=""
-                                highlight={result.hitTarget}
+                                highlight={cleanEntry}
                             />
                             <ResultItem label="Flight Time" value={result.flightTime.toFixed(3)} unit="s"/>
                             <ResultItem label="Max Height" value={result.maxHeight.toFixed(2)} unit="m"/>
@@ -551,17 +521,30 @@ export default function TrajectorySimulator() {
                     {/* Visualization */}
                     <div className="lg:col-span-2">
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
-                            <div className="flex items-center justify-between mb-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                 <h2 className="text-lg font-semibold text-indigo-400">Trajectory Graph</h2>
+                                <div className="flex rounded-lg border border-slate-600 overflow-hidden">
+                                    <button type="button" onClick={() => setViewMode('2d')}
+                                        className={`px-3 py-1 text-xs ${viewMode === '2d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>
+                                        2-D
+                                    </button>
+                                    <button type="button" onClick={() => setViewMode('3d')}
+                                        className={`px-3 py-1 text-xs ${viewMode === '3d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>
+                                        3-D
+                                    </button>
+                                </div>
                                 <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                                    result.hitTarget
+                                    cleanEntry
                                         ? 'bg-green-500/20 text-green-400 border border-green-500/50'
-                                        : 'bg-red-500/20 text-red-400 border border-red-500/50'
+                                        : classification === 'miss'
+                                            ? 'bg-red-500/20 text-red-400 border border-red-500/50'
+                                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/50'
                                 }`}>
-                  {result.hitTarget ? '✓ TARGET HIT' : '✗ MISS'}
-                </span>
+                                    {classificationLabel}
+                                </span>
                             </div>
 
+                            {viewMode === '2d' ? (
                             <svg viewBox="0 0 600 400" className="w-full h-auto bg-slate-900/50 rounded-lg">
                                 {/* Grid */}
                                 <defs>
@@ -571,24 +554,23 @@ export default function TrajectorySimulator() {
                                 </defs>
                                 <rect width="600" height="400" fill="url(#grid)"/>
 
-                                {/* Target funnel */}
+                                {/* HUB funnel side profile from shared collision geometry */}
                                 <path
-                                    d={`M ${targetVis.funnelLeft.x} ${targetVis.funnelLeft.y} 
-                      L ${targetVis.entryLeft.x} ${targetVis.entryLeft.y}
-                      L ${targetVis.entryRight.x} ${targetVis.entryRight.y}
-                      L ${targetVis.funnelRight.x} ${targetVis.funnelRight.y}`}
-                                    fill="rgba(34, 197, 94, 0.1)"
-                                    stroke="#22c55e"
-                                    strokeWidth="3"
-                                />
-                                <line
-                                    x1={targetVis.entryLeft.x}
-                                    y1={targetVis.entryLeft.y}
-                                    x2={targetVis.entryRight.x}
-                                    y2={targetVis.entryRight.y}
+                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y}
+                      L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
+                      L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
+                      L ${targetVis.topRight.x} ${targetVis.topRight.y} Z`}
+                                    fill="rgba(34, 197, 94, 0.08)"
                                     stroke="#22c55e"
                                     strokeWidth="2"
-                                    strokeDasharray="5,5"
+                                />
+                                <line
+                                    x1={targetVis.topLeft.x}
+                                    y1={targetVis.topLeft.y}
+                                    x2={targetVis.topRight.x}
+                                    y2={targetVis.topRight.y}
+                                    stroke="#4ade80"
+                                    strokeWidth="3"
                                 />
 
                                 {/* Error envelope */}
@@ -658,6 +640,14 @@ export default function TrajectorySimulator() {
                                     Hub
                                 </text>
                             </svg>
+                            ) : (
+                                <Trajectory3DView
+                                    samples={result.samples3d}
+                                    hubGeometry={result.hubGeometry}
+                                    interaction={result.hubInteraction}
+                                    ballRadius={radius}
+                                />
+                            )}
 
                             {/* Info bar */}
                             <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
