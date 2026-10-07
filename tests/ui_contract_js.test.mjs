@@ -162,7 +162,7 @@ test('game profile editor creates persistent game pieces and scoring openings', 
     'Vertical rectangular opening',
     'Vertical circular opening',
     'Save & Activate Profile',
-  ]) assert.match(panel, new RegExp(label.replace(/[\/]/g, '\\/')));
+  ]) assert.ok(panel.includes(label), `missing editor label: ${label}`);
   assert.match(panel, /window\.localStorage/);
   assert.match(panel, /saveGameProfile/);
   assert.match(simulator, /GameProfilePanel/);
