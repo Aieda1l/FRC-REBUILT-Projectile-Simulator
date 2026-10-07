@@ -185,7 +185,7 @@ Mirror Step 1 against `FlightParameters` and `derivatives`.
 
 For both languages:
 - use the same state and two identical lift tables except `Cl=+0.2` vs `Cl=-0.2`; assert Magnus acceleration contributions are equal magnitude and opposite direction after subtracting gravity/buoyancy;
-- use a `table2d` drag model with coefficients differing by spin column; assert the same translational speed with different perpendicular spin produces different drag acceleration;
+- use a `table2d` drag model with coefficients differing by spin column and Magnus disabled; assert the same translational speed with different perpendicular spin produces different drag acceleration;
 - at matching wind / zero relative airflow, assert aerodynamic translational force is zero even if the model lookup reports a clamped 2-D coefficient.
 
 - [ ] **Step 4: Update analytic-vacuum tests before running the new default**
@@ -310,7 +310,7 @@ In JS and Python uncertainty tests:
 Run:
 ```bash
 node --test tests/physics3d_js.test.mjs tests/uncertainty_js.test.mjs
-python -m unittest tests.test_api tests.test_uncertainty tests.test_legacy_adapter -v
+python -m unittest tests.test_api tests.test_uncertainty tests.test_legacy_adapter tests.test_calibration -v
 ```
 
 Expected: new propagation/scaling tests FAIL.
