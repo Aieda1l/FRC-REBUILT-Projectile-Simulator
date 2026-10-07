@@ -124,3 +124,14 @@ test('robust optimization is routed through worker only when robust analysis is 
   assert.match(source, /finalSamples/);
   assert.match(source, /uncertainty/);
 });
+
+
+test('robust uncertainty UI exposes forward and lateral robot velocity sigma', async () => {
+  const panel = await readFile(new URL('../src/AdvancedPhysicsPanel.jsx', import.meta.url), 'utf8');
+  const simulator = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /Robot Forward σ/);
+  assert.match(panel, /Robot Lateral σ/);
+  assert.match(panel, /setVectorSigma/);
+  assert.match(simulator, /robotVelocity:\s*\[/);
+  assert.match(simulator, /kind:\s*['"]normal['"][^\n]*mean:\s*0[^\n]*sigma:/);
+});
