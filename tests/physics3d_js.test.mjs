@@ -312,3 +312,31 @@ test('simulateShot adds robot velocity once and forwards lateral motion', () => 
   assertArrayClose(result.samples3d[0].state.slice(3, 6), [12, 1, 0]);
   assert.ok(result.samples3d.at(-1).state[1] > 0);
 });
+
+
+test('simulateShot rotates shooter-relative muzzle direction and backspin with azimuth', () => {
+  const result = simulateShot({
+    launchX: 0,
+    launchY: 1,
+    velocity: 10,
+    angleDeg: 0,
+    azimuthDeg: 90,
+    spinRPM: 60,
+    mass: 0.215,
+    radius: 0.075,
+    dragCoeff: 0.47,
+    liftCoeff: 0.25,
+    airDensity: 1.204,
+    gravity: 0,
+    enableDrag: false,
+    enableMagnus: false,
+    targetX: 0,
+    robotVelocity: [0, 0, 0],
+    wind: [0, 0, 0],
+  }, {dt: 0.01, maxTime: 0.01});
+  const initial = result.samples3d[0].state;
+  assert.ok(Math.abs(initial[3]) < 1e-12);
+  assert.ok(Math.abs(initial[4] - 10) < 1e-12);
+  assert.ok(Math.abs(initial[6] - 2 * Math.PI) < 1e-12);
+  assert.ok(Math.abs(initial[7]) < 1e-12);
+});
