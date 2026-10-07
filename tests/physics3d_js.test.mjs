@@ -296,3 +296,19 @@ test('aerodynamic diagnostics stay finite at zero relative airflow', () => {
     liftClamped: false,
   });
 });
+
+
+test('simulateShot adds robot velocity once and forwards lateral motion', () => {
+  const result = simulateShot(baseParams({
+    launchX: 0,
+    launchY: 1,
+    velocity: 10,
+    angleDeg: 0,
+    enableDrag: false,
+    enableMagnus: false,
+    robotVelocity: [2, 1, 0],
+    wind: [0, 0, 0],
+  }), {maxTime: 0.1});
+  assertArrayClose(result.samples3d[0].state.slice(3, 6), [12, 1, 0]);
+  assert.ok(result.samples3d.at(-1).state[1] > 0);
+});
