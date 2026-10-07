@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - milestone-2-rk45-3d-engine
+    paths:
+      - .github/workflows/milestone2-sync.yml
 
 permissions:
   contents: write
@@ -25,7 +27,8 @@ jobs:
           tar -xzf /tmp/m2.tar.gz -C /tmp/m2
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a /tmp/m2/. .
-      - name: Commit exact reviewed tree
+          git checkout HEAD -- .github/workflows
+      - name: Commit exact reviewed source tree
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
