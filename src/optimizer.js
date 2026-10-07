@@ -169,8 +169,8 @@ function createEvaluator(params, callbacks, totalCandidates) {
         evaluatedCandidates,
         totalCandidates,
         bestCandidate,
-        classification: interactionOf(bestCandidate?.result ?? {}).classification ?? 'miss',
-        clearanceMargin: interactionOf(bestCandidate?.result ?? {}).clearanceMargin ?? -Infinity,
+        classification: interactionOf(bestCandidate?.result ?? {})?.classification ?? 'miss',
+        clearanceMargin: interactionOf(bestCandidate?.result ?? {})?.clearanceMargin ?? -Infinity,
       });
     }
   };
