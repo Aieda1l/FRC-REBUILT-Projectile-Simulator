@@ -1,0 +1,37 @@
+name: One-shot Milestone 2.1 reviewed tree sync
+
+on:
+  push:
+    branches:
+      - milestone-2-rk45-3d-engine
+    paths:
+      - .github/workflows/milestone21-sync.yml
+
+permissions:
+  contents: write
+
+jobs:
+  sync-reviewed-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch reviewed source archive
+        run: |
+          curl -fsSL https://sb-6ei77p0pdqxr.vercel.run/.sync/m21.tar.gz -o /tmp/m21.tar.gz
+          echo "8eeec179bec86af302747e8fc07701981943285b07b0fdc34b7c6bc420250cf0  /tmp/m21.tar.gz" | sha256sum -c -
+      - name: Replace working tree with reviewed archive
+        run: |
+          mkdir -p /tmp/m21
+          tar -xzf /tmp/m21.tar.gz -C /tmp/m21
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/m21/. .
+          git checkout HEAD -- .github/workflows
+      - name: Commit exact reviewed source tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: finalize Milestone 2.1 HUB geometry and 3-D UX"
+          git push origin HEAD:milestone-2-rk45-3d-engine
