@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from calibration.fitting import (
     fit_drag_model,
     fit_lift_model,
     fit_spin_decay,
+    partition_shots_by_spin_parameter,
     split_shots,
     validate_profile,
 )
@@ -52,7 +54,13 @@ def main():
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--drag-model", choices=("constant", "table1d"), default="constant")
     parser.add_argument("--lift-model", choices=("table1d", "table2d"), default="table1d")
+    parser.add_argument("--drag-max-spin-parameter", type=float, default=0.05)
     args = parser.parse_args()
+    if (
+        not math.isfinite(args.drag_max_spin_parameter)
+        or args.drag_max_spin_parameter < 0
+    ):
+        parser.error("--drag-max-spin-parameter must be finite and non-negative")
 
     shots, base = load_dataset(args.input)
     base = {
@@ -64,13 +72,30 @@ def main():
         **base,
     }
     train, validation = split_shots(shots, args.validation_fraction, args.seed)
-    drag = fit_drag_model(train, base, args.drag_model)
-    spinning = [shot for shot in train if any(abs(float(value)) > 1e-9 for value in shot.get("spin", []))]
-    lift = (
-        fit_lift_model(spinning, base, drag, args.lift_model)
-        if len(spinning) >= 2
-        else {"kind": "legacy-spin-cap", "maxCoefficient": 0.0, "saturationSpin": 0.5}
+    drag_shots, spinning = partition_shots_by_spin_parameter(
+        train,
+        base,
+        args.drag_max_spin_parameter,
     )
+    print(
+        "Calibration selection: "
+        f"drag={len(drag_shots)} "
+        f"spinning={len(spinning)} "
+        f"max_drag_spin_parameter={args.drag_max_spin_parameter:g}"
+    )
+    if not drag_shots:
+        parser.error(
+            "no low-spin training shots at or below "
+            f"--drag-max-spin-parameter {args.drag_max_spin_parameter:g}; "
+            "collect low-spin data or explicitly raise --drag-max-spin-parameter"
+        )
+
+    drag = fit_drag_model(drag_shots, base, args.drag_model)
+    if len(spinning) >= 2:
+        lift = fit_lift_model(spinning, base, drag, args.lift_model)
+    else:
+        print("Lift fitting skipped: fewer than two spinning training shots.")
+        lift = {"kind": "legacy-spin-cap", "maxCoefficient": 0.0, "saturationSpin": 0.5}
     decay = fit_spin_decay(train, base)
     domain = dataset_domain(train, base)
     profile = {
