@@ -535,7 +535,14 @@ export default function TrajectorySimulator() {
                             </div>
 
                             {viewMode === '3d' ? (
-                                <Trajectory3DView samples={result.samples3d} hubGeometry={hubGeometry} interaction={result.hubInteraction} ballRadius={radius} />
+                                <Trajectory3DView
+                                    samples={result.samples3d}
+                                    idealSamples={showIdeal ? idealResult?.samples3d ?? [] : []}
+                                    envelopeSamples={showEnvelope ? envelopeResults.map((entry) => entry.samples3d) : []}
+                                    hubGeometry={hubGeometry}
+                                    interaction={result.hubInteraction}
+                                    ballRadius={radius}
+                                />
                             ) : (
                             <svg viewBox="0 0 600 400" className="w-full h-auto bg-slate-900/50 rounded-lg">
                                 {/* Grid */}
