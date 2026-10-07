@@ -142,11 +142,13 @@ The returned object contains at least:
 
 Find the first descending segment that crosses `z_top` and linearly interpolate the full state at the crossing.
 
-At the top crossing:
+At the top crossing, let `raw_edge_distance = min_i(a_top - n_i dot [x,y])` and `edge_clearance = raw_edge_distance - ballRadius`:
 
-- if the sphere-center horizontal clearance to the top hex is >= ball radius, entry is geometrically valid;
-- if the center is within one ball radius of an opening edge but does not have full clearance, classify `rim-collision`;
-- if it is farther outside the opening than one radius, classify `miss`.
+- if `edge_clearance >= 0`, entry is geometrically valid;
+- if `edge_clearance < 0` but the sphere overlaps/touches the top polygon boundary (its minimum Euclidean distance to a top hex edge is <= `ballRadius`), classify `rim-collision`;
+- if the sphere is fully separated from the top opening/rim, classify `miss`.
+
+This distinction handles both centers just inside an edge without enough ball clearance and centers just outside the polygon whose sphere still strikes the rim.
 
 ### Funnel passage
 
@@ -200,14 +202,15 @@ Move optimization out of `TrajectorySimulator.jsx`.
 
 Create `src/optimizer.js` containing deterministic pure search functions. It may call `simulateShot`, but has no React or Worker dependencies.
 
-All optimizers rank candidates by a continuous objective:
+All optimizers use a deterministic lexicographic ranking:
 
-1. any `clean-entry` outranks every collision/miss;
-2. among clean entries, larger positive `clearanceMargin` is preferred;
-3. ties prefer the candidate closer to the requested/current velocity or angle so results are stable and do not jump unnecessarily;
-4. for misses/collisions, smaller `missDistance` / less-negative clearance is preferred so refinement can converge toward the opening rather than relying on a boolean hit.
+1. classification rank: `clean-entry = 3`, `rim-collision/funnel-collision = 2`, `miss = 1`;
+2. for `clean-entry`, larger positive `clearanceMargin` wins;
+3. for collisions, larger (less-negative) `clearanceMargin` wins;
+4. for misses, smaller `missDistance` wins;
+5. exact ties prefer the candidate closest to the requested/current velocity and/or angle so results are stable.
 
-No optimizer may accept `rim-collision` or `funnel-collision` as a valid solution.
+No optimizer may return `rim-collision` or `funnel-collision` as a successful solution. If no clean entry exists in the bounded search, it reports no solution while still exposing the best near-miss for diagnostics/progress.
 
 ### Coarse-to-fine search
 
