@@ -7,6 +7,7 @@ import numpy as np
 from api.physics3d import (
     FlightParameters,
     IntegrationError,
+    aerodynamic_diagnostics,
     derivatives,
     integrate_trajectory,
     launch_state,
@@ -189,6 +190,44 @@ class Physics3DTests(unittest.TestCase):
         initial = launch_state((0, 0, 1), (1, 0, 0), (0, 0, 0))
         with self.assertRaises(ValueError):
             integrate_trajectory(initial, self.vacuum, method="euler")
+
+
+    def test_advanced_models_override_scalar_fallbacks(self):
+        state = launch_state((0, 0, 1), (10, 0, 0), (0, -100, 0))
+        diagnostics = aerodynamic_diagnostics(
+            state,
+            FlightParameters(
+                drag_coefficient=0.99,
+                lift_coefficient=0.99,
+                drag_model={"kind": "constant", "coefficient": 0.12},
+                lift_model={
+                    "kind": "table2d",
+                    "reynolds": [50000, 200000],
+                    "spinParameters": [0, 1],
+                    "coefficients": [[0, 0.1], [0, 0.3]],
+                },
+            ),
+        )
+        self.assertEqual(diagnostics["dragCoefficient"], 0.12)
+        self.assertGreater(diagnostics["liftCoefficient"], 0)
+        self.assertLess(diagnostics["liftCoefficient"], 0.99)
+        self.assertFalse(diagnostics["dragClamped"])
+        self.assertFalse(diagnostics["liftClamped"])
+
+    def test_aerodynamic_diagnostics_are_finite_at_zero_relative_airflow(self):
+        state = launch_state((0, 0, 1), (10, 0, 0), (0, -100, 0))
+        diagnostics = aerodynamic_diagnostics(
+            state,
+            FlightParameters(wind=(10, 0, 0)),
+        )
+        self.assertEqual(diagnostics, {
+            "reynolds": 0.0,
+            "spinParameter": 0.0,
+            "dragCoefficient": 0.47,
+            "liftCoefficient": 0.0,
+            "dragClamped": False,
+            "liftClamped": False,
+        })
 
 
 if __name__ == "__main__":

@@ -261,3 +261,38 @@ test('optimizer dt override uses fewer samples without changing the UI default',
   assert.ok(Math.abs(uiDefault.samples3d[1].time - 0.001) < 1e-12);
 });
 
+
+
+import { aerodynamicDiagnostics } from '../src/physics3d.js';
+
+test('advanced aerodynamic models override scalar fallbacks', () => {
+  const state = launchState([0, 0, 1], [10, 0, 0], [0, -100, 0]);
+  const diagnostics = aerodynamicDiagnostics(state, {
+    dragCoefficient: 0.99,
+    liftCoefficient: 0.99,
+    dragModel: {kind: 'constant', coefficient: 0.12},
+    liftModel: {
+      kind: 'table2d',
+      reynolds: [50000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0, 0.1], [0, 0.3]],
+    },
+  });
+  assert.equal(diagnostics.dragCoefficient, 0.12);
+  assert.ok(diagnostics.liftCoefficient > 0 && diagnostics.liftCoefficient < 0.99);
+  assert.equal(diagnostics.dragClamped, false);
+  assert.equal(diagnostics.liftClamped, false);
+});
+
+test('aerodynamic diagnostics stay finite at zero relative airflow', () => {
+  const state = launchState([0, 0, 1], [10, 0, 0], [0, -100, 0]);
+  const diagnostics = aerodynamicDiagnostics(state, {wind: [10, 0, 0]});
+  assert.deepEqual(diagnostics, {
+    reynolds: 0,
+    spinParameter: 0,
+    dragCoefficient: 0.47,
+    liftCoefficient: 0,
+    dragClamped: false,
+    liftClamped: false,
+  });
+});
