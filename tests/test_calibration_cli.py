@@ -46,7 +46,8 @@ def run_cli(shots, *extra):
     completed = subprocess.run(
         [
             sys.executable,
-            "scripts/calibrate_fuel.py",
+            "-m",
+            "scripts.calibrate_fuel",
             str(input_path),
             "--output",
             str(output_path),

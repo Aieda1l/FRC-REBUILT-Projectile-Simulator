@@ -1,12 +1,13 @@
 import math
 import unittest
 
+import calibration.fitting as fitting
+
 from calibration.fitting import (
     fit_drag_model,
     fit_lift_model,
     fit_spin_decay,
     parse_calibration_profile,
-    partition_shots_by_spin_parameter,
     split_shots,
     validate_profile,
     _flight_parameters_for_shot,
@@ -167,7 +168,7 @@ class CalibrationFittingTests(unittest.TestCase):
             "muzzleVelocity": [1, 0, 0],
             "spin": [0, -10, 0],
         }
-        drag, spinning = partition_shots_by_spin_parameter(
+        drag, spinning = fitting.partition_shots_by_spin_parameter(
             [low_s_high_raw_spin, high_s_low_raw_spin],
             self.base,
             0.05,
@@ -182,7 +183,7 @@ class CalibrationFittingTests(unittest.TestCase):
             "muzzleVelocity": [10, 0, 0],
             "spin": [0, -10, 0],
         }
-        drag, spinning = partition_shots_by_spin_parameter(
+        drag, spinning = fitting.partition_shots_by_spin_parameter(
             [boundary],
             self.base,
             0.075,
@@ -192,7 +193,7 @@ class CalibrationFittingTests(unittest.TestCase):
         for invalid in (-0.01, float("inf"), float("nan")):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(ValueError):
-                    partition_shots_by_spin_parameter([boundary], self.base, invalid)
+                    fitting.partition_shots_by_spin_parameter([boundary], self.base, invalid)
 
     def test_constant_drag_fit_recovers_synthetic_coefficient(self):
         truth = FlightParameters(
