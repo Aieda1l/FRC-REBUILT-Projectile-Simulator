@@ -1,3 +1,13 @@
+import {
+  DEFAULT_DYNAMIC_VISCOSITY,
+  evaluateDragModel,
+  evaluateLiftModel,
+  normalizeDragModel,
+  normalizeLiftModel,
+  reynoldsNumber,
+  spinParameter as dimensionlessSpinParameter,
+} from './aerodynamics.js';
+
 const EPS = 1e-12;
 
 export const DEFAULT_FLIGHT_PARAMETERS = Object.freeze({
@@ -6,6 +16,9 @@ export const DEFAULT_FLIGHT_PARAMETERS = Object.freeze({
   dragCoefficient: 0.47,
   liftCoefficient: 0.25,
   airDensity: 1.204,
+  dynamicViscosity: DEFAULT_DYNAMIC_VISCOSITY,
+  dragModel: null,
+  liftModel: null,
   gravity: 9.81,
   wind: [0, 0, 0],
   enableDrag: true,
@@ -45,11 +58,14 @@ function normalizeParams(input = {}) {
   finiteNumber(p.dragCoefficient, 'dragCoefficient');
   finiteNumber(p.liftCoefficient, 'liftCoefficient');
   finiteNumber(p.airDensity, 'airDensity');
+  finiteNumber(p.dynamicViscosity, 'dynamicViscosity');
   finiteNumber(p.gravity, 'gravity');
-  if (p.mass <= 0 || p.radius <= 0) throw new RangeError('mass and radius must be positive');
+  if (p.mass <= 0 || p.radius <= 0 || p.dynamicViscosity <= 0) throw new RangeError('mass, radius, and dynamicViscosity must be positive');
   if (p.dragCoefficient < 0 || p.liftCoefficient < 0 || p.airDensity < 0 || p.gravity < 0) {
     throw new RangeError('aerodynamic coefficients, air density, and gravity must be non-negative');
   }
+  p.dragModel = normalizeDragModel(input.dragModel ?? null, p.dragCoefficient);
+  p.liftModel = normalizeLiftModel(input.liftModel ?? null, p.liftCoefficient);
   if (p.spinDecayTimeConstant !== null) {
     finiteNumber(p.spinDecayTimeConstant, 'spinDecayTimeConstant');
     if (p.spinDecayTimeConstant <= 0) throw new RangeError('spinDecayTimeConstant must be positive');
@@ -93,39 +109,93 @@ export function launchState(position, muzzleVelocity, spin, robotVelocity = [0, 
   ];
 }
 
+function aerodynamicState(y, p) {
+  const velocity = y.slice(3, 6);
+  const omega = y.slice(6, 9);
+  const relativeVelocity = velocity.map((value, i) => value - p.wind[i]);
+  const speed = norm(relativeVelocity);
+  if (speed <= EPS) {
+    const drag = evaluateDragModel(p.dragModel, 0);
+    const lift = evaluateLiftModel(p.liftModel, 0, 0);
+    return {
+      speed,
+      uHat: [0, 0, 0],
+      omegaPerp: [0, 0, 0],
+      omegaPerpMag: 0,
+      diagnostics: {
+        reynolds: 0,
+        spinParameter: 0,
+        dragCoefficient: drag.coefficient,
+        liftCoefficient: lift.coefficient,
+        dragClamped: drag.clamped,
+        liftClamped: lift.clamped,
+      },
+    };
+  }
+
+  const uHat = relativeVelocity.map((value) => value / speed);
+  const projection = dot(omega, uHat);
+  const omegaPerp = omega.map((value, i) => value - projection * uHat[i]);
+  const omegaPerpMag = norm(omegaPerp);
+  const reynolds = reynoldsNumber({
+    airDensity: p.airDensity,
+    speed,
+    diameter: 2 * p.radius,
+    dynamicViscosity: p.dynamicViscosity,
+  });
+  const s = dimensionlessSpinParameter({
+    radius: p.radius,
+    perpendicularSpin: omegaPerpMag,
+    speed,
+  });
+  const drag = evaluateDragModel(p.dragModel, reynolds);
+  const lift = evaluateLiftModel(p.liftModel, reynolds, s);
+  return {
+    speed,
+    uHat,
+    omegaPerp,
+    omegaPerpMag,
+    diagnostics: {
+      reynolds,
+      spinParameter: s,
+      dragCoefficient: drag.coefficient,
+      liftCoefficient: lift.coefficient,
+      dragClamped: drag.clamped,
+      liftClamped: lift.clamped,
+    },
+  };
+}
+
+export function aerodynamicDiagnostics(state, params = {}) {
+  const y = state9(state);
+  const p = normalizeParams(params);
+  return aerodynamicState(y, p).diagnostics;
+}
+
 export function derivatives(state, params = {}) {
   const y = state9(state);
   const p = normalizeParams(params);
   const velocity = y.slice(3, 6);
   const omega = y.slice(6, 9);
-  const relativeVelocity = velocity.map((value, i) => value - p.wind[i]);
-  const speed = norm(relativeVelocity);
   const acceleration = [0, 0, -p.gravity];
+  const aero = aerodynamicState(y, p);
 
-  if (speed > EPS) {
-    const uHat = relativeVelocity.map((value) => value / speed);
+  if (aero.speed > EPS) {
     const area = Math.PI * p.radius * p.radius;
-    const dynamicArea = 0.5 * p.airDensity * area * speed * speed;
+    const dynamicArea = 0.5 * p.airDensity * area * aero.speed * aero.speed;
 
-    if (p.enableDrag && p.dragCoefficient > 0) {
+    if (p.enableDrag && aero.diagnostics.dragCoefficient > 0) {
       for (let i = 0; i < 3; i += 1) {
-        acceleration[i] += -dynamicArea * p.dragCoefficient * uHat[i] / p.mass;
+        acceleration[i] += -dynamicArea * aero.diagnostics.dragCoefficient * aero.uHat[i] / p.mass;
       }
     }
 
-    if (p.enableMagnus && p.liftCoefficient > 0) {
-      const projection = dot(omega, uHat);
-      const omegaPerp = omega.map((value, i) => value - projection * uHat[i]);
-      const omegaPerpMag = norm(omegaPerp);
-      if (omegaPerpMag > EPS) {
-        const spinParameter = p.radius * omegaPerpMag / speed;
-        const effectiveCl = p.liftCoefficient * Math.min(spinParameter / 0.5, 1);
-        const lift = cross(omegaPerp, uHat);
-        const liftNorm = norm(lift);
-        if (liftNorm > EPS) {
-          for (let i = 0; i < 3; i += 1) {
-            acceleration[i] += dynamicArea * effectiveCl * (lift[i] / liftNorm) / p.mass;
-          }
+    if (p.enableMagnus && aero.diagnostics.liftCoefficient > 0 && aero.omegaPerpMag > EPS) {
+      const lift = cross(aero.omegaPerp, aero.uHat);
+      const liftNorm = norm(lift);
+      if (liftNorm > EPS) {
+        for (let i = 0; i < 3; i += 1) {
+          acceleration[i] += dynamicArea * aero.diagnostics.liftCoefficient * (lift[i] / liftNorm) / p.mass;
         }
       }
     }

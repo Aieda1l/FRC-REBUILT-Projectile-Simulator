@@ -2,7 +2,7 @@
 
 A web-based physics simulator for FIRST Robotics Competition (FRC) teams to calculate and optimize shooting
 trajectories. It models gravity, quadratic air drag, backspin/Magnus lift, and interactive error analysis while keeping
-uncalibrated FUEL-specific aerodynamic assumptions explicit.
+uncalibrated FUEL-specific aerodynamic assumptions explicit while supporting measured calibration profiles and robust Monte Carlo optimization.
 
 ![React](https://img.shields.io/badge/React-18.0+-61DAFB.svg?logo=react&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.68+-009688.svg?logo=fastapi&logoColor=white)
@@ -14,8 +14,8 @@ uncalibrated FUEL-specific aerodynamic assumptions explicit.
 ### Physics Modeling
 
 - **Gravitational acceleration**: Standard configurable 9.81 m/s²; altitude and temperature adjust air density, not gravity.
-- **Quadratic air drag**: Standard $\frac{1}{2}\rho A C_d v^2$ force law.
-- **Magnus effect**: Arbitrary 3-D spin vectors using the dimensionless spin parameter $S=\omega_\perp r/v$.
+- **Quadratic air drag**: Standard $\frac{1}{2}\rho A C_d v^2$ force law with either a scalar baseline or calibrated $C_d(Re)$ tables.
+- **Magnus effect**: Arbitrary 3-D spin vectors using the dimensionless spin parameter $S=\omega_\perp r/v$, with legacy or calibrated $C_l(S,Re)$ models.
 - **Spin decay**: Disabled by default for FUEL until a measured decay time constant is available; an optional calibrated time constant is integrated as part of the ODE.
 - **Environment**: Air-density correction for temperature/altitude in the legacy Python adapter plus field-axis wind vectors in the canonical 3-D core.
 - **Numerical solvers**: True whole-state RK4 and adaptive Dormand-Prince RK45. The browser uses fixed-step RK4 by default; the new 3-D API defaults to RK45.
@@ -36,9 +36,11 @@ Browser scoring and visualization use one shared regular-hex funnel model derive
 
 A trajectory is classified as **clean entry**, **rim collision**, **funnel collision**, or **miss**. Only a clean entry is reported as a successful shot or accepted by the optimizer. A ball that contacts a modeled funnel panel is intentionally rejected even though a real compliant foam FUEL might deform or bounce into the HUB.
 
-### Responsive Optimization
+### Responsive and Robust Optimization
 
-The three optimizer actions run in a Web Worker rather than the UI thread. Searches use a coarse pass followed by local refinement, expose progress and a **Cancel Optimization** control, and revalidate any winning candidate at the normal browser step size before applying it.
+The three deterministic optimizer actions run in a Web Worker rather than the UI thread. Searches use a coarse pass followed by local refinement, expose progress and a **Cancel Optimization** control, and revalidate any winning candidate at the normal browser step size before applying it.
+
+Advanced Physics also supports seeded Monte Carlo analysis and robust optimization. Robust mode screens candidates deterministically, evaluates a shortlist under configured launch/aerodynamic uncertainty, ranks primarily by clean-entry probability and low-percentile clearance, then re-evaluates the winner with the full sample count at `dt=0.001 s`.
 
 ### Interactive Web GUI
 
@@ -88,6 +90,9 @@ npm install
 
 # Install Backend Dependencies (Optional for local API testing)
 pip install -r requirements.txt
+
+# Optional: offline calibration/fitting tools
+pip install -r requirements-calibration.txt
 ```
 
 ### 2. Run Locally
@@ -136,7 +141,7 @@ $F_{magnus} = \frac{1}{2} \rho A C_l v^2 \hat{m}$
 
 The current 2-D baseline uses $S=|\omega|r/v$ and ramps $C_l$ linearly to the configured cap by $S=0.5$. The configured FUEL lift coefficient is applied exactly once.
 
-### Calibration Status
+### Baseline and Calibrated Aerodynamics
 
 The 2026 FUEL defaults are intentionally conservative rather than presented as measured constants:
 
@@ -149,6 +154,12 @@ The 2026 FUEL defaults are intentionally conservative rather than presented as m
 - Flywheel-to-exit-speed/backspin calculations remain rough launcher estimates and should be replaced by measured exit conditions when possible.
 
 Reference background: [NASA sphere drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/) and [FIRST 2026 season materials](https://www.firstinspires.org/resources/library/frc/season-materials).
+
+For measured operation, the simulator accepts versioned JSON calibration profiles containing a constant or tabulated drag model, a spin/Reynolds-dependent lift model, an optional measured spin-decay time constant, calibrated Reynolds/spin domains, and validation metrics. Out-of-domain table queries clamp to the calibrated boundary and are surfaced as diagnostics rather than silently extrapolated.
+
+The browser's **Advanced Physics** panel exposes calibration profile loading, robot forward/lateral velocity, wind, uncertainty controls, and robust optimization. Measured exit speed/spin are treated as the authoritative launch inputs; the flywheel calculator remains a heuristic and requires an explicit **Apply Estimate** action.
+
+See [FUEL Calibration and Validation Guide](docs/calibration-guide.md) for high-speed-video measurement, dataset format, fitting, held-out validation, and uncertainty setup. No measured FUEL aerodynamic coefficient set is bundled with the project.
 
 ## Python API Usage
 

@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+from .aerodynamics import (
+    DEFAULT_DYNAMIC_VISCOSITY,
+    evaluate_drag_model,
+    evaluate_lift_model,
+    normalize_drag_model,
+    normalize_lift_model,
+    reynolds_number,
+    spin_parameter as dimensionless_spin_parameter,
+)
 
 _EPS = 1e-12
 
@@ -23,6 +33,9 @@ class FlightParameters:
     drag_coefficient: float = 0.47
     lift_coefficient: float = 0.25
     air_density: float = 1.204
+    dynamic_viscosity: float = DEFAULT_DYNAMIC_VISCOSITY
+    drag_model: Optional[Dict[str, Any]] = None
+    lift_model: Optional[Dict[str, Any]] = None
     gravity: float = 9.81
     wind: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     enable_drag: bool = True
@@ -38,6 +51,10 @@ class FlightParameters:
             value = getattr(self, name)
             if not np.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and non-negative")
+        if not np.isfinite(self.dynamic_viscosity) or self.dynamic_viscosity <= 0:
+            raise ValueError("dynamic_viscosity must be finite and positive")
+        self.drag_model = normalize_drag_model(self.drag_model, self.drag_coefficient)
+        self.lift_model = normalize_lift_model(self.lift_model, self.lift_coefficient)
         self.wind = tuple(_vector3(self.wind, "wind"))
         if self.spin_decay_time_constant is not None:
             if (not np.isfinite(self.spin_decay_time_constant)
@@ -76,38 +93,97 @@ def launch_state(
     return np.concatenate((position_v, muzzle_v + robot_v, spin_v)).astype(np.float64)
 
 
+def _aerodynamic_state(state: np.ndarray, params: FlightParameters) -> dict:
+    velocity = state[3:6]
+    omega = state[6:9]
+    relative_velocity = velocity - np.asarray(params.wind, dtype=np.float64)
+    speed = float(np.linalg.norm(relative_velocity))
+    if speed <= _EPS:
+        drag = evaluate_drag_model(params.drag_model, 0.0)
+        lift = evaluate_lift_model(params.lift_model, 0.0, 0.0)
+        return {
+            "speed": speed,
+            "u_hat": np.zeros(3, dtype=np.float64),
+            "omega_perp": np.zeros(3, dtype=np.float64),
+            "omega_perp_mag": 0.0,
+            "diagnostics": {
+                "reynolds": 0.0,
+                "spinParameter": 0.0,
+                "dragCoefficient": drag["coefficient"],
+                "liftCoefficient": lift["coefficient"],
+                "dragClamped": drag["clamped"],
+                "liftClamped": lift["clamped"],
+            },
+        }
+
+    u_hat = relative_velocity / speed
+    omega_perp = omega - float(np.dot(omega, u_hat)) * u_hat
+    omega_perp_mag = float(np.linalg.norm(omega_perp))
+    reynolds = reynolds_number(
+        air_density=params.air_density,
+        speed=speed,
+        diameter=2.0 * params.radius,
+        dynamic_viscosity=params.dynamic_viscosity,
+    )
+    spin_value = dimensionless_spin_parameter(
+        radius=params.radius,
+        perpendicular_spin=omega_perp_mag,
+        speed=speed,
+    )
+    drag = evaluate_drag_model(params.drag_model, reynolds)
+    lift = evaluate_lift_model(params.lift_model, reynolds, spin_value)
+    return {
+        "speed": speed,
+        "u_hat": u_hat,
+        "omega_perp": omega_perp,
+        "omega_perp_mag": omega_perp_mag,
+        "diagnostics": {
+            "reynolds": reynolds,
+            "spinParameter": spin_value,
+            "dragCoefficient": drag["coefficient"],
+            "liftCoefficient": lift["coefficient"],
+            "dragClamped": drag["clamped"],
+            "liftClamped": lift["clamped"],
+        },
+    }
+
+
+def aerodynamic_diagnostics(state: np.ndarray, params: FlightParameters) -> dict:
+    return _aerodynamic_state(_state9(state), params)["diagnostics"]
+
+
 def derivatives(state: np.ndarray, params: FlightParameters) -> np.ndarray:
     y = _state9(state)
     velocity = y[3:6]
     omega = y[6:9]
     acceleration = np.array([0.0, 0.0, -params.gravity], dtype=np.float64)
+    aero = _aerodynamic_state(y, params)
 
-    relative_velocity = velocity - np.asarray(params.wind, dtype=np.float64)
-    speed = float(np.linalg.norm(relative_velocity))
-
-    if speed > _EPS:
-        u_hat = relative_velocity / speed
+    if aero["speed"] > _EPS:
         area = np.pi * params.radius ** 2
-        dynamic_area = 0.5 * params.air_density * area * speed ** 2
+        dynamic_area = 0.5 * params.air_density * area * aero["speed"] ** 2
+        diagnostics = aero["diagnostics"]
 
-        if params.enable_drag and params.drag_coefficient > 0:
+        if params.enable_drag and diagnostics["dragCoefficient"] > 0:
             acceleration += (
-                -dynamic_area * params.drag_coefficient * u_hat / params.mass
+                -dynamic_area * diagnostics["dragCoefficient"] * aero["u_hat"] / params.mass
             )
 
-        if params.enable_magnus and params.lift_coefficient > 0:
-            omega_perp = omega - float(np.dot(omega, u_hat)) * u_hat
-            omega_perp_mag = float(np.linalg.norm(omega_perp))
-            if omega_perp_mag > _EPS:
-                spin_parameter = params.radius * omega_perp_mag / speed
-                effective_cl = params.lift_coefficient * min(spin_parameter / 0.5, 1.0)
-                lift_direction = np.cross(omega_perp, u_hat)
-                lift_norm = float(np.linalg.norm(lift_direction))
-                if lift_norm > _EPS:
-                    lift_direction /= lift_norm
-                    acceleration += (
-                        dynamic_area * effective_cl * lift_direction / params.mass
-                    )
+        if (
+            params.enable_magnus
+            and diagnostics["liftCoefficient"] > 0
+            and aero["omega_perp_mag"] > _EPS
+        ):
+            lift_direction = np.cross(aero["omega_perp"], aero["u_hat"])
+            lift_norm = float(np.linalg.norm(lift_direction))
+            if lift_norm > _EPS:
+                lift_direction /= lift_norm
+                acceleration += (
+                    dynamic_area
+                    * diagnostics["liftCoefficient"]
+                    * lift_direction
+                    / params.mass
+                )
 
     if params.spin_decay_time_constant is None:
         spin_derivative = np.zeros(3, dtype=np.float64)

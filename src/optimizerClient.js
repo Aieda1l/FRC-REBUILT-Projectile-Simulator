@@ -16,7 +16,7 @@ export function createOptimizerClient({
     active = null;
   };
 
-  const start = (mode, params) => {
+  const start = (mode, params, options) => {
     terminateActive();
     const requestId = nextRequestId++;
     const worker = workerFactory();
@@ -46,7 +46,9 @@ export function createOptimizerClient({
       onError(messageText);
     };
 
-    worker.postMessage({type: 'optimize', requestId, mode, params});
+    const message = {type: 'optimize', requestId, mode, params};
+    if (options !== undefined) message.options = options;
+    worker.postMessage(message);
     return requestId;
   };
 

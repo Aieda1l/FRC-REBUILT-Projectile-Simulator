@@ -26,6 +26,8 @@ CASE_NAMES = [
     "robot_velocity",
     "spin_decay",
     "rk45",
+    "calibrated_drag_wind_robot",
+    "calibrated_lift_wind_robot",
 ]
 
 
@@ -152,6 +154,98 @@ def build_fixture():
             "atol": 1e-9,
         },
         "expectedFinal": _list(rk45_samples[-1].state),
+    })
+
+
+    calibrated_drag_model = {
+        "kind": "table1d",
+        "reynolds": [50000.0, 100000.0, 200000.0],
+        "coefficients": [0.55, 0.45, 0.30],
+    }
+    calibrated_drag_initial = launch_state(
+        (0, 0, 1.5),
+        (11.0, 0.0, 6.0),
+        (0.0, -120.0, 0.0),
+        (1.2, 0.4, 0.0),
+    )
+    calibrated_drag_params = FlightParameters(
+        wind=(1.0, -0.5, 0.0),
+        drag_model=calibrated_drag_model,
+        enable_magnus=False,
+    )
+    calibrated_drag_samples = integrate_trajectory(
+        calibrated_drag_initial,
+        calibrated_drag_params,
+        method="rk4",
+        dt=0.05,
+        max_time=0.25,
+        terminal_height=None,
+    )
+    cases.append({
+        "name": "calibrated_drag_wind_robot",
+        "operation": "trajectoryFinal",
+        "initialState": _list(calibrated_drag_initial),
+        "robotVelocity": [1.2, 0.4, 0.0],
+        "params": {
+            "wind": [1.0, -0.5, 0.0],
+            "dragModel": calibrated_drag_model,
+            "enableMagnus": False,
+        },
+        "options": {
+            "method": "rk4",
+            "dt": 0.05,
+            "maxTime": 0.25,
+            "terminalHeight": None,
+        },
+        "expectedFinal": _list(calibrated_drag_samples[-1].state),
+    })
+
+    calibrated_lift_model = {
+        "kind": "table2d",
+        "reynolds": [50000.0, 120000.0, 220000.0],
+        "spinParameters": [0.0, 0.5, 1.0],
+        "coefficients": [
+            [0.0, 0.10, 0.15],
+            [0.0, 0.18, 0.28],
+            [0.0, 0.22, 0.34],
+        ],
+    }
+    calibrated_lift_initial = launch_state(
+        (0, 0, 1.5),
+        (10.0, 1.0, 7.0),
+        (0.0, -160.0, 40.0),
+        (0.8, -0.3, 0.0),
+    )
+    calibrated_lift_params = FlightParameters(
+        wind=(0.5, 0.2, 0.0),
+        drag_model={"kind": "constant", "coefficient": 0.4},
+        lift_model=calibrated_lift_model,
+    )
+    calibrated_lift_samples = integrate_trajectory(
+        calibrated_lift_initial,
+        calibrated_lift_params,
+        method="rk4",
+        dt=0.05,
+        max_time=0.25,
+        terminal_height=None,
+    )
+    cases.append({
+        "name": "calibrated_lift_wind_robot",
+        "operation": "trajectoryFinal",
+        "initialState": _list(calibrated_lift_initial),
+        "robotVelocity": [0.8, -0.3, 0.0],
+        "params": {
+            "wind": [0.5, 0.2, 0.0],
+            "dragModel": {"kind": "constant", "coefficient": 0.4},
+            "liftModel": calibrated_lift_model,
+        },
+        "options": {
+            "method": "rk4",
+            "dt": 0.05,
+            "maxTime": 0.25,
+            "terminalHeight": None,
+        },
+        "expectedFinal": _list(calibrated_lift_samples[-1].state),
     })
 
     assert [case["name"] for case in cases] == CASE_NAMES

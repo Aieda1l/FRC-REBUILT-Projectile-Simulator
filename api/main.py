@@ -1,4 +1,4 @@
-from typing import Literal, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -54,6 +54,9 @@ class Sim3DRequest(BaseModel):
     drag_coefficient: float = Field(default=0.47, ge=0)
     lift_coefficient: float = Field(default=0.25, ge=0)
     air_density: float = Field(default=1.204, ge=0)
+    dynamic_viscosity: float = Field(default=1.81e-5, gt=0)
+    drag_model: Optional[Dict[str, Any]] = None
+    lift_model: Optional[Dict[str, Any]] = None
     gravity: float = Field(default=9.81, ge=0)
     spin_decay_time_constant: Optional[float] = Field(default=None, gt=0)
     enable_drag: bool = True
@@ -90,25 +93,28 @@ async def simulate(data: SimRequest):
 
 @app.post("/api/simulate3d")
 async def simulate3d(data: Sim3DRequest):
-    params = FlightParameters(
-        mass=data.mass,
-        radius=data.radius,
-        drag_coefficient=data.drag_coefficient,
-        lift_coefficient=data.lift_coefficient,
-        air_density=data.air_density,
-        gravity=data.gravity,
-        wind=data.wind,
-        enable_drag=data.enable_drag,
-        enable_magnus=data.enable_magnus,
-        spin_decay_time_constant=data.spin_decay_time_constant,
-    )
-    initial = launch_state(
-        data.position,
-        data.muzzle_velocity,
-        data.spin,
-        data.robot_velocity,
-    )
     try:
+        params = FlightParameters(
+            mass=data.mass,
+            radius=data.radius,
+            drag_coefficient=data.drag_coefficient,
+            lift_coefficient=data.lift_coefficient,
+            air_density=data.air_density,
+            dynamic_viscosity=data.dynamic_viscosity,
+            drag_model=data.drag_model,
+            lift_model=data.lift_model,
+            gravity=data.gravity,
+            wind=data.wind,
+            enable_drag=data.enable_drag,
+            enable_magnus=data.enable_magnus,
+            spin_decay_time_constant=data.spin_decay_time_constant,
+        )
+        initial = launch_state(
+            data.position,
+            data.muzzle_velocity,
+            data.spin,
+            data.robot_velocity,
+        )
         samples = integrate_trajectory(
             initial,
             params,
@@ -120,7 +126,7 @@ async def simulate3d(data: Sim3DRequest):
             min_step=data.min_step,
             max_step=data.max_step,
         )
-    except IntegrationError as exc:
+    except (IntegrationError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     serialized = []

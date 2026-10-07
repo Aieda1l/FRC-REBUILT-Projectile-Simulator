@@ -1,5 +1,6 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
 import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
+import {summarizeCalibrationDomain} from './calibration.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -33,25 +34,44 @@ export function simulateShot(params, options = {}) {
     launchY,
     velocity,
     angleDeg,
+    azimuthDeg = 0,
     spinRPM,
     mass,
     radius,
     dragCoeff,
     liftCoeff,
     airDensity,
+    dynamicViscosity,
+    dragModel,
+    liftModel,
+    spinDecayTimeConstant,
+    calibrationProfile = null,
     gravity,
     enableDrag,
     enableMagnus,
     targetX = 0,
     targetLateralY = 0,
+    robotVelocity = [0, 0, 0],
+    wind = [0, 0, 0],
   } = params;
 
   const angle = angleDeg * DEG_TO_RAD;
+  const azimuth = azimuthDeg * DEG_TO_RAD;
   const spin = spinRPM * 2 * Math.PI / 60;
+  const horizontalSpeed = velocity * Math.cos(angle);
   const initial = launchState(
     [launchX, 0, launchY],
-    [velocity * Math.cos(angle), 0, velocity * Math.sin(angle)],
-    [0, -spin, 0],
+    [
+      horizontalSpeed * Math.cos(azimuth),
+      horizontalSpeed * Math.sin(azimuth),
+      velocity * Math.sin(angle),
+    ],
+    [
+      spin * Math.sin(azimuth),
+      -spin * Math.cos(azimuth),
+      0,
+    ],
+    robotVelocity,
   );
   const flightParams = {
     mass,
@@ -60,6 +80,11 @@ export function simulateShot(params, options = {}) {
     liftCoefficient: liftCoeff,
     airDensity,
     gravity,
+    wind,
+    dragModel,
+    liftModel,
+    ...(spinDecayTimeConstant === undefined ? {} : {spinDecayTimeConstant}),
+    ...(dynamicViscosity === undefined ? {} : {dynamicViscosity}),
     enableDrag,
     enableMagnus,
   };
@@ -71,6 +96,10 @@ export function simulateShot(params, options = {}) {
     terminalHeight: 0,
     terminalDirection: -1,
   });
+
+  const calibrationDiagnostics = calibrationProfile
+    ? summarizeCalibrationDomain(samples3d, flightParams, calibrationProfile)
+    : null;
 
   const hubGeometry = createHubGeometry({
     centerX: targetX,
@@ -109,6 +138,7 @@ export function simulateShot(params, options = {}) {
   return {
     samples3d,
     points,
+    calibrationDiagnostics,
     hubGeometry,
     hubInteraction,
     hitTarget,

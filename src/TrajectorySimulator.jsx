@@ -4,6 +4,8 @@ import Toggle from './Toggle.jsx';
 import {createOptimizerClient} from './optimizerClient.js';
 import Trajectory3DView from './Trajectory3DView.jsx';
 import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
+import {applyCalibrationProfile, parseCalibrationProfile} from './calibration.js';
+import AdvancedPhysicsPanel from './AdvancedPhysicsPanel.jsx';
 
 // Physics constants and utilities
 const DEG_TO_RAD = Math.PI / 180;
@@ -113,6 +115,7 @@ export default function TrajectorySimulator() {
     const [launchY, setLaunchY] = useState(0.5);
     const [velocity, setVelocity] = useState(12.0);
     const [angle, setAngle] = useState(55);
+    const [azimuth, setAzimuth] = useState(0);
     const [spinRPM, setSpinRPM] = useState(2000);
 
     // Backspin estimator parameters
@@ -128,6 +131,29 @@ export default function TrajectorySimulator() {
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
     const [viewMode, setViewMode] = useState('2d');
+
+    // Advanced calibrated physics
+    const [robotVelocity, setRobotVelocity] = useState([0, 0, 0]);
+    const [wind, setWind] = useState([0, 0, 0]);
+    const [calibrationProfile, setCalibrationProfile] = useState(null);
+    const [profileError, setProfileError] = useState('');
+    const [robustEnabled, setRobustEnabled] = useState(false);
+    const [uncertaintyConfig, setUncertaintyConfig] = useState({
+        velocity: {kind: 'normal', mean: 0, sigma: 0.25},
+        angleDeg: {kind: 'normal', mean: 0, sigma: 0.5},
+        spinRPM: {kind: 'normal', mean: 0, sigma: 100},
+        mass: {kind: 'normal', mean: 0, sigma: 0.004},
+        robotVelocity: [
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+        ],
+        dragMultiplier: {kind: 'normal', mean: 1, sigma: 0.05, min: 0},
+        liftMultiplier: {kind: 'normal', mean: 1, sigma: 0.05, min: 0},
+    });
+    const [uncertaintySeed, setUncertaintySeed] = useState(2026);
+    const [robustSampleCount, setRobustSampleCount] = useState(512);
+    const [robustOptimizationResult, setRobustOptimizationResult] = useState(null);
 
     // Optimizer status
     const [optimizerRunning, setOptimizerRunning] = useState(false);
@@ -171,13 +197,19 @@ export default function TrajectorySimulator() {
         console.log("Python Result:", data);
     };
 
-    // Build params object
-    const params = useMemo(() => ({
-        launchX, launchY, velocity, angleDeg: angle, spinRPM,
+    // Build params object. Calibration profiles only replace aerodynamic model fields.
+    const params = useMemo(() => applyCalibrationProfile({
+        launchX, launchY, velocity, angleDeg: angle, azimuthDeg: azimuth, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
-        targetX
-    }), [launchX, launchY, velocity, angle, spinRPM, enableDrag, enableMagnus, targetX]);
+        targetX,
+        targetLateralY: 0,
+        robotVelocity,
+        wind,
+    }, calibrationProfile), [
+        launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
+        targetX, robotVelocity, wind, calibrationProfile,
+    ]);
 
     // Run simulation
     const optimizerClient = useMemo(() => createOptimizerClient({
@@ -187,10 +219,22 @@ export default function TrajectorySimulator() {
         onComplete: (optimization) => {
             setOptimizerRunning(false);
             setOptimizerProgress(null);
+            setRobustOptimizationResult(optimization.solution?.robust ?? null);
             if (optimization.solution) {
                 setVelocity(Math.round(optimization.solution.velocity * 10) / 10);
                 setAngle(Math.round(optimization.solution.angle * 10) / 10);
-                setOptimizerStatus('Clean entry found');
+                if (Number.isFinite(optimization.solution.azimuth)) {
+                    setAzimuth(Math.round(optimization.solution.azimuth * 10) / 10);
+                }
+                setOptimizerStatus(
+                    Number.isFinite(optimization.solution.azimuth)
+                        ? `Clean entry found (azimuth ${optimization.solution.azimuth.toFixed(1)}°)`
+                        : 'Clean entry found'
+                );
+            } else if (optimization.reason === 'lateral-compensation-infeasible') {
+                setOptimizerStatus(
+                    'No clean entry: lateral robot velocity exceeds the available horizontal muzzle speed at this elevation. Try Best V + Angle.'
+                );
             } else {
                 const near = optimization.bestNearMiss?.result?.hubInteraction?.classification;
                 setOptimizerStatus(near ? `No clean entry found (best: ${near})` : 'No clean entry found');
@@ -253,8 +297,19 @@ export default function TrajectorySimulator() {
         setOptimizerRunning(true);
         setOptimizerProgress({evaluatedCandidates: 0, totalCandidates: mode === 'both' ? 980 : mode === 'angle' ? 160 : 100});
         setOptimizerStatus('');
-        optimizerClient.start(mode, params);
-    }, [optimizerClient, params]);
+        const optimizerMode = robustEnabled ? 'robust' : mode;
+        const optimizerOptions = robustEnabled ? {
+            mode,
+            uncertainty: uncertaintyConfig,
+            coarseSamples: 64,
+            finalSamples: robustSampleCount,
+            seed: uncertaintySeed,
+        } : undefined;
+        optimizerClient.start(optimizerMode, params, optimizerOptions);
+    }, [
+        optimizerClient, params, robustEnabled, uncertaintyConfig,
+        robustSampleCount, uncertaintySeed,
+    ]);
 
     const cancelOptimization = useCallback(() => {
         optimizerClient.cancel();
@@ -263,10 +318,28 @@ export default function TrajectorySimulator() {
         setOptimizerStatus('Optimization cancelled');
     }, [optimizerClient]);
 
-    // Apply estimated backspin
-    const handleApplyEstimatedSpin = useCallback(() => {
+    // Apply heuristic flywheel estimates only after an explicit user action.
+    const handleApplyEstimate = useCallback(() => {
+        setVelocity(Math.round(estimatedExitVel * 10) / 10);
         setSpinRPM(Math.round(estimatedSpin));
-    }, [estimatedSpin]);
+    }, [estimatedExitVel, estimatedSpin]);
+
+    const handleProfileFile = useCallback(async (file) => {
+        if (!file) return;
+        try {
+            const profileText = await file.text();
+            const parsedProfile = parseCalibrationProfile(profileText);
+            setCalibrationProfile(parsedProfile);
+            setProfileError('');
+        } catch (error) {
+            setProfileError(error instanceof Error ? error.message : String(error));
+        }
+    }, []);
+
+    const clearCalibrationProfile = useCallback(() => {
+        setCalibrationProfile(null);
+        setProfileError('');
+    }, []);
 
     // Calculate plot bounds
     const plotBounds = useMemo(() => {
@@ -467,10 +540,10 @@ export default function TrajectorySimulator() {
                                     </div>
 
                                     <button
-                                        onClick={handleApplyEstimatedSpin}
+                                        onClick={handleApplyEstimate}
                                         className="w-full mt-3 py-2 bg-gradient-to-r from-amber-500 to-orange-500 rounded-lg font-semibold hover:from-amber-400 hover:to-orange-400 transition-all"
                                     >
-                                        Apply Estimated Backspin
+                                        Apply Estimate
                                     </button>
                                 </div>
                             )}
@@ -493,6 +566,29 @@ export default function TrajectorySimulator() {
                                 </div>
                             )}
                         </div>
+
+                        <AdvancedPhysicsPanel
+                            aimAzimuth={azimuth}
+                            onAimAzimuthChange={setAzimuth}
+                            robotVelocity={robotVelocity}
+                            onRobotVelocityChange={setRobotVelocity}
+                            wind={wind}
+                            onWindChange={setWind}
+                            calibrationProfile={calibrationProfile}
+                            profileError={profileError}
+                            onProfileFile={handleProfileFile}
+                            onClearProfile={clearCalibrationProfile}
+                            calibrationDiagnostics={result.calibrationDiagnostics}
+                            robustEnabled={robustEnabled}
+                            onRobustEnabledChange={setRobustEnabled}
+                            uncertaintyConfig={uncertaintyConfig}
+                            onUncertaintyConfigChange={setUncertaintyConfig}
+                            uncertaintySeed={uncertaintySeed}
+                            onUncertaintySeedChange={setUncertaintySeed}
+                            robustSampleCount={robustSampleCount}
+                            onRobustSampleCountChange={setRobustSampleCount}
+                            robustResult={robustOptimizationResult}
+                        />
 
                         {/* Results */}
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">

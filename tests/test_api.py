@@ -101,5 +101,30 @@ class ApiTests(unittest.TestCase):
             )
 
 
+    def test_simulate3d_accepts_calibrated_aerodynamic_models(self):
+        response = asyncio.run(simulate3d(Sim3DRequest(
+            position=(0, 0, 1),
+            muzzle_velocity=(10, 0, 0),
+            spin=(0, 0, 0),
+            gravity=0,
+            drag_coefficient=0,
+            drag_model={"kind": "constant", "coefficient": 0.5},
+            enable_magnus=False,
+            max_time=0.1,
+        )))
+        self.assertLess(response["samples"][-1]["velocity"][0], 10.0)
+
+    def test_simulate3d_rejects_malformed_aerodynamic_model_as_http_400(self):
+        request = Sim3DRequest(
+            position=(0, 0, 1),
+            muzzle_velocity=(10, 0, 0),
+            spin=(0, 0, 0),
+            drag_model={"kind": "table1d", "reynolds": [100000], "coefficients": [0.5]},
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(simulate3d(request))
+        self.assertEqual(ctx.exception.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

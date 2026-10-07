@@ -78,3 +78,69 @@ test('3-D renderer has distinct ideal and envelope styles', async () => {
   assert.match(source, /#22d3ee/);
   assert.match(source, /#f59e0b/);
 });
+
+test('Advanced Physics panel exposes motion wind profile and uncertainty controls', async () => {
+  const source = await readFile(new URL('../src/AdvancedPhysicsPanel.jsx', import.meta.url), 'utf8');
+  for (const label of [
+    'Advanced Physics',
+    'Robot Forward Velocity',
+    'Robot Lateral Velocity',
+    'Wind Forward',
+    'Wind Lateral',
+    'Calibration Profile',
+    'Robust Analysis',
+    'Velocity σ',
+    'Angle σ',
+    'Spin σ',
+  ]) assert.match(source, new RegExp(label));
+  assert.match(source, /validation\.rms3d/);
+  assert.match(source, /clampedFraction/);
+});
+
+test('TrajectorySimulator validates profile JSON without replacing a valid profile on error', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /parseCalibrationProfile/);
+  assert.match(source, /setProfileError/);
+  assert.match(source, /setCalibrationProfile/);
+  assert.match(source, /applyCalibrationProfile/);
+  assert.match(source, /calibrationProfile/);
+});
+
+test('flywheel estimator requires explicit Apply Estimate action for measured launch state', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /handleApplyEstimate/);
+  assert.match(source, /setVelocity\(/);
+  assert.match(source, /setSpinRPM\(/);
+  assert.match(source, /Apply Estimate/);
+  assert.doesNotMatch(source, /Apply Estimated Backspin/);
+});
+
+test('robust optimization is routed through worker only when robust analysis is enabled', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /robustEnabled/);
+  assert.match(source, /optimizerMode/);
+  assert.match(source, /optimizerOptions/);
+  assert.match(source, /optimizerClient\.start\(optimizerMode, params, optimizerOptions\)/);
+  assert.match(source, /finalSamples/);
+  assert.match(source, /uncertainty/);
+});
+
+
+test('robust uncertainty UI exposes forward and lateral robot velocity sigma', async () => {
+  const panel = await readFile(new URL('../src/AdvancedPhysicsPanel.jsx', import.meta.url), 'utf8');
+  const simulator = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(panel, /Robot Forward σ/);
+  assert.match(panel, /Robot Lateral σ/);
+  assert.match(panel, /setVectorSigma/);
+  assert.match(simulator, /robotVelocity:\s*\[/);
+  assert.match(simulator, /kind:\s*['"]normal['"][^\n]*mean:\s*0[^\n]*sigma:/);
+});
+
+
+test('optimized lateral lead is persisted and infeasible velocity-only motion gets a specific message', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /azimuthDeg/);
+  assert.match(source, /setAzimuth/);
+  assert.match(source, /lateral-compensation-infeasible/);
+  assert.match(source, /Best V \+ Angle/);
+});
