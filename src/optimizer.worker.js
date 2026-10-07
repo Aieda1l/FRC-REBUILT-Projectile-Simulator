@@ -1,13 +1,14 @@
-import {optimizeAngle, optimizeBoth, optimizeVelocity} from './optimizer.js';
+import {optimizeAngle, optimizeBoth, optimizeRobust, optimizeVelocity} from './optimizer.js';
 
 const optimizers = {
   angle: optimizeAngle,
   velocity: optimizeVelocity,
   both: optimizeBoth,
+  robust: optimizeRobust,
 };
 
 self.onmessage = (event) => {
-  const {type, requestId, mode, params} = event.data ?? {};
+  const {type, requestId, mode, params, options} = event.data ?? {};
   if (type !== 'optimize') return;
 
   const optimize = optimizers[mode];
@@ -17,9 +18,15 @@ self.onmessage = (event) => {
   }
 
   try {
-    const result = optimize(params, {
+    const progressCallbacks = {
       onProgress: (progress) => self.postMessage({type: 'progress', requestId, progress}),
-    });
+    };
+    const result = mode === 'robust'
+      ? optimizeRobust(params, options ?? {}, progressCallbacks)
+      : optimize(params, progressCallbacks);
+    /*
+      legacy: true,
+    });*/
     self.postMessage({type: 'complete', requestId, result});
   } catch (error) {
     self.postMessage({

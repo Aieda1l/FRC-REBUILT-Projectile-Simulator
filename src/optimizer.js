@@ -1,4 +1,5 @@
 import {simulateShot} from './trajectory2d.js';
+import {evaluateShotUncertainty} from './uncertainty.js';
 
 const CLASSIFICATION_RANK = {
   'clean-entry': 3,
@@ -38,6 +39,18 @@ export function rankCandidate(a, b, reference) {
   }
 
   return referenceDistance(a, reference) - referenceDistance(b, reference);
+}
+
+export function rankRobustCandidate(a, b, reference) {
+  const probabilityA = a.robust?.probabilities?.['clean-entry'] ?? 0;
+  const probabilityB = b.robust?.probabilities?.['clean-entry'] ?? 0;
+  if (probabilityA !== probabilityB) return probabilityB - probabilityA;
+
+  const clearanceA = a.robust?.clearance?.p10 ?? -Infinity;
+  const clearanceB = b.robust?.clearance?.p10 ?? -Infinity;
+  if (clearanceA !== clearanceB) return clearanceB - clearanceA;
+
+  return rankCandidate(a, b, reference);
 }
 
 function numericRange(start, end, step) {
@@ -146,7 +159,7 @@ function finalize(candidates, evaluator) {
   };
 }
 
-export function optimizeAngle(params, callbacks = {}) {
+function searchAngle(params, callbacks = {}) {
   const evaluator = createEvaluator(params, callbacks, 160);
   const coarse = numericRange(5, 85, 2).map((angle) => (
     evaluator.evaluate(params.velocity, angle, 0.005)
@@ -163,11 +176,15 @@ export function optimizeAngle(params, callbacks = {}) {
       refined.push(evaluator.evaluate(params.velocity, angle, 0.002));
     }
   }
-
-  return finalize([...coarse, ...refined], evaluator);
+  return {candidates: [...coarse, ...refined], evaluator};
 }
 
-export function optimizeVelocity(params, callbacks = {}) {
+export function optimizeAngle(params, callbacks = {}) {
+  const search = searchAngle(params, callbacks);
+  return finalize(search.candidates, search.evaluator);
+}
+
+function searchVelocity(params, callbacks = {}) {
   const evaluator = createEvaluator(params, callbacks, 100);
   const coarse = numericRange(5, 25, 1).map((velocity) => (
     evaluator.evaluate(velocity, params.angleDeg, 0.005)
@@ -184,11 +201,15 @@ export function optimizeVelocity(params, callbacks = {}) {
       refined.push(evaluator.evaluate(velocity, params.angleDeg, 0.002));
     }
   }
-
-  return finalize([...coarse, ...refined], evaluator);
+  return {candidates: [...coarse, ...refined], evaluator};
 }
 
-export function optimizeBoth(params, callbacks = {}) {
+export function optimizeVelocity(params, callbacks = {}) {
+  const search = searchVelocity(params, callbacks);
+  return finalize(search.candidates, search.evaluator);
+}
+
+function searchBoth(params, callbacks = {}) {
   const evaluator = createEvaluator(params, callbacks, 980);
   const coarse = [];
 
@@ -212,6 +233,83 @@ export function optimizeBoth(params, callbacks = {}) {
       }
     }
   }
+  return {candidates: [...coarse, ...refined], evaluator};
+}
 
-  return finalize([...coarse, ...refined], evaluator);
+export function optimizeBoth(params, callbacks = {}) {
+  const search = searchBoth(params, callbacks);
+  return finalize(search.candidates, search.evaluator);
+}
+
+export function optimizeRobust(params, {
+  mode = 'both',
+  uncertainty = {},
+  coarseSamples = 64,
+  finalSamples = 512,
+  seed = 2026,
+} = {}, callbacks = {}) {
+  const searchers = {angle: searchAngle, velocity: searchVelocity, both: searchBoth};
+  const searcher = searchers[mode];
+  if (!searcher) throw new RangeError(`unknown robust optimization mode: ${mode}`);
+
+  const search = searcher(params, callbacks);
+  const ranked = sortCandidates(uniqueCandidates(search.candidates), search.evaluator.reference);
+  const clean = ranked.filter((candidate) => (
+    candidate.result.hubInteraction.classification === 'clean-entry'
+  ));
+  const shortlist = (clean.length ? clean : ranked).slice(0, 10);
+  const robustCandidates = shortlist.map((candidate, index) => {
+    const robust = evaluateShotUncertainty(
+      {...params, velocity: candidate.velocity, angleDeg: candidate.angle},
+      uncertainty,
+      {sampleCount: coarseSamples, seed, dt: 0.002},
+    );
+    const evaluated = {...candidate, robust};
+    callbacks.onProgress?.({
+      stage: 'robust',
+      evaluatedCandidates: index + 1,
+      totalCandidates: shortlist.length,
+      bestCandidate: evaluated,
+      cleanEntryProbability: robust.probabilities['clean-entry'],
+      clearanceP10: robust.clearance.p10,
+    });
+    return evaluated;
+  });
+
+  robustCandidates.sort((a, b) => rankRobustCandidate(a, b, search.evaluator.reference));
+  const best = robustCandidates[0] ?? null;
+  const bestNearMiss = ranked.find(
+    (candidate) => candidate.result.hubInteraction.classification !== 'clean-entry',
+  ) ?? null;
+
+  if (!best || best.result.hubInteraction.classification !== 'clean-entry') {
+    return {
+      solution: null,
+      bestNearMiss: bestNearMiss ?? search.evaluator.bestCandidate,
+      evaluatedCandidates: search.evaluator.evaluatedCandidates,
+      monteCarloEvaluations: robustCandidates.length,
+    };
+  }
+
+  const finalParams = {...params, velocity: best.velocity, angleDeg: best.angle};
+  const result = simulateShot(finalParams, {dt: 0.001});
+  if (result.hubInteraction.classification !== 'clean-entry') {
+    return {
+      solution: null,
+      bestNearMiss: {...best, result},
+      evaluatedCandidates: search.evaluator.evaluatedCandidates,
+      monteCarloEvaluations: robustCandidates.length,
+    };
+  }
+  const robust = evaluateShotUncertainty(finalParams, uncertainty, {
+    sampleCount: finalSamples,
+    seed,
+    dt: 0.001,
+  });
+  return {
+    solution: {velocity: best.velocity, angle: best.angle, result, robust},
+    bestNearMiss,
+    evaluatedCandidates: search.evaluator.evaluatedCandidates,
+    monteCarloEvaluations: robustCandidates.length + 1,
+  };
 }
