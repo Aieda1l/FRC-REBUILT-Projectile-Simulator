@@ -51,7 +51,9 @@ test('2-D drag models interpolate over Reynolds number and spin', () => {
 
   assert.deepEqual(evaluateDragModel(model, 150000, 0.5), {coefficient: 0.35, clamped: false});
   assert.deepEqual(evaluateDragModel(model, 50000, 0.5), {coefficient: 0.45, clamped: true});
-  assert.deepEqual(evaluateDragModel(model, 150000, 2), {coefficient: 0.3, clamped: true});
+  const highSpin = evaluateDragModel(model, 150000, 2);
+  assert.equal(highSpin.clamped, true);
+  assert.ok(Math.abs(highSpin.coefficient - 0.3) < 1e-12);
   assert.deepEqual(evaluateDragModel(model, 150000), {coefficient: 0.4, clamped: false});
 });
 

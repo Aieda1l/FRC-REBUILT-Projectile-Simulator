@@ -89,7 +89,7 @@ export function normalizeDragModel(model, fallbackCoefficient) {
       reynolds,
       spinParameters,
       coefficients: input.coefficients.map((row, index) => (
-        signedCoefficients(row, spinParameters.length, `coefficients[${index}]`)
+        coefficients(row, spinParameters.length, `coefficients[${index}]`)
       )),
     };
   }
@@ -125,7 +125,7 @@ export function normalizeLiftModel(model, fallbackCoefficient) {
       reynolds,
       spinParameters,
       coefficients: input.coefficients.map((row, index) => (
-        coefficients(row, spinParameters.length, `coefficients[${index}]`)
+        signedCoefficients(row, spinParameters.length, `coefficients[${index}]`)
       )),
     };
   }

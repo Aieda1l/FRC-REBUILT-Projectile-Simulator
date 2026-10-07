@@ -59,10 +59,9 @@ class AerodynamicsTests(unittest.TestCase):
             evaluate_drag_model(model, 50000, 0.5),
             {"coefficient": 0.45, "clamped": True},
         )
-        self.assertEqual(
-            evaluate_drag_model(model, 150000, 2),
-            {"coefficient": 0.3, "clamped": True},
-        )
+        high_spin = evaluate_drag_model(model, 150000, 2)
+        self.assertTrue(high_spin["clamped"])
+        self.assertAlmostEqual(high_spin["coefficient"], 0.3, places=12)
         self.assertEqual(
             evaluate_drag_model(model, 150000),
             {"coefficient": 0.4, "clamped": False},
