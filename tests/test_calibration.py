@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from api.calibration import (
+from calibration.fitting import (
     fit_drag_model,
     fit_lift_model,
     fit_spin_decay,

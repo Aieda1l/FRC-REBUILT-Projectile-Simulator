@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, Sequence
 import numpy as np
 from scipy.optimize import least_squares
 
-from .aerodynamics import (
+from api.aerodynamics import (
     evaluate_drag_model,
     evaluate_lift_model,
     normalize_drag_model,
@@ -18,13 +18,13 @@ from .aerodynamics import (
     reynolds_number,
     spin_parameter,
 )
-from .physics3d import (
+from api.physics3d import (
     FlightParameters,
     aerodynamic_diagnostics,
     integrate_trajectory,
     launch_state,
 )
-from .uncertainty import CLASSIFICATIONS, classify_hub_samples
+from api.uncertainty import CLASSIFICATIONS, classify_hub_samples
 
 CALIBRATION_SCHEMA = "frc-projectile-calibration-v1"
 

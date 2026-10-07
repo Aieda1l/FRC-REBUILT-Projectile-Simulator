@@ -90,6 +90,9 @@ npm install
 
 # Install Backend Dependencies (Optional for local API testing)
 pip install -r requirements.txt
+
+# Optional: offline calibration/fitting tools
+pip install -r requirements-calibration.txt
 ```
 
 ### 2. Run Locally

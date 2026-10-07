@@ -8,5 +8,10 @@
       "source": "/(.*)",
       "destination": "/"
     }
-  ]
+  ],
+  "functions": {
+    "api/**/*.py": {
+      "excludeFiles": "{tests/**,docs/**,scripts/**,calibration/**}"
+    }
+  }
 }

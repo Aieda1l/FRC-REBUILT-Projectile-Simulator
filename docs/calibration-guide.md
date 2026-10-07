@@ -75,10 +75,10 @@ For each observation, use a time in seconds and a measured position in meters. K
 
 ## Fit a profile
 
-Install the Python dependencies first:
+Install the offline calibration dependencies first (these are intentionally separate from the Vercel runtime dependencies):
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-calibration.txt
 ```
 
 Then run:
