@@ -144,3 +144,29 @@ test('optimized lateral lead is persisted and infeasible velocity-only motion ge
   assert.match(source, /lateral-compensation-infeasible/);
   assert.match(source, /Best V \+ Angle/);
 });
+
+
+test('game profile editor creates persistent game pieces and scoring openings', async () => {
+  const panel = await readFile(new URL('../src/GameProfilePanel.jsx', import.meta.url), 'utf8');
+  const simulator = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  for (const label of [
+    'Game Piece & Scoring',
+    'Profile Name',
+    'Piece Name',
+    'Mass',
+    'Diameter',
+    'Collision Diameter',
+    'Drag Coefficient',
+    'Lift Coefficient',
+    'Top circular hub / opening',
+    'Vertical rectangular opening',
+    'Vertical circular opening',
+    'Save & Activate Profile',
+  ]) assert.match(panel, new RegExp(label.replace(/[\/]/g, '\\/')));
+  assert.match(panel, /window\.localStorage/);
+  assert.match(panel, /saveGameProfile/);
+  assert.match(simulator, /GameProfilePanel/);
+  assert.match(simulator, /applyGameProfile/);
+  assert.match(simulator, /activeGameProfile/);
+  assert.match(simulator, /scoringInteraction/);
+});
