@@ -36,6 +36,9 @@ class GamePieceProperties:
     drag_coefficient: float  # dimensionless
     lift_coefficient: float  # for Magnus effect
     moment_of_inertia: float  # kg·m² (for spin dynamics)
+    # Optional calibrated 1/e spin-decay time constant in seconds.
+    # None means hold spin constant rather than invent an unmeasured decay law.
+    spin_decay_time_constant: Optional[float] = None
 
     @classmethod
     def from_game_piece(cls, piece: GamePiece) -> 'GamePieceProperties':
@@ -43,11 +46,15 @@ class GamePieceProperties:
         properties = {
             GamePiece.FUEL: cls(
                 name="Fuel (2026)",
-                mass=0.227,  # ~0.5 lb
+                # Official FUEL mass range is approximately 0.203-0.227 kg.
+                # Use the midpoint until a specific ball is weighed/calibrated.
+                mass=0.215,
                 radius=0.075,  # 0.15 m diameter / 2
-                drag_coefficient=0.47,  # sphere-like
+                # Uncalibrated smooth-sphere baseline; real foam-ball Cd can vary with Re/wear.
+                drag_coefficient=0.47,
+                # Uncalibrated cap for the spin-parameter lift model below.
                 lift_coefficient=0.25,
-                moment_of_inertia=0.00051  # solid sphere approximation (2/5 * m * r^2)
+                moment_of_inertia=0.000484  # 2/5 * m * r^2 using nominal mass
             ),
             GamePiece.NOTE_2024: cls(
                 name="Note (2024)",
@@ -210,7 +217,9 @@ class PhysicsEngine:
         # Precompute constants
         self.cross_section = np.pi * game_piece.radius ** 2
         self.drag_factor = 0.5 * environment.air_density * self.cross_section * game_piece.drag_coefficient
-        self.magnus_factor = 0.5 * environment.air_density * self.cross_section * game_piece.lift_coefficient
+        # Keep aerodynamic dynamic-pressure/area terms separate from C_l so the
+        # lift coefficient is applied exactly once in compute_magnus_force().
+        self.magnus_factor = 0.5 * environment.air_density * self.cross_section
 
     def compute_drag_force(self, vx: float, vy: float) -> Tuple[float, float]:
         """
@@ -246,11 +255,12 @@ class PhysicsEngine:
         # Magnus coefficient depends on spin parameter S = ω*r/v
         spin_param = abs(spin) * self.piece.radius / speed
 
-        # Empirical Magnus coefficient (Kutta-Joukowski approximation)
-        # Cl typically varies with spin parameter
-        effective_cl = self.piece.lift_coefficient * min(spin_param, 0.5) * 2
+        # Uncalibrated spinning-sphere baseline. The spin-parameter dependence
+        # is intentionally simple until FUEL-specific trajectory data exists:
+        # linear lift growth to S=0.5, then capped at lift_coefficient.
+        effective_cl = self.piece.lift_coefficient * min(spin_param, 0.5) * 2.0
 
-        magnus_magnitude = self.magnus_factor * speed ** 2 * effective_cl
+        magnus_magnitude = self.magnus_factor * effective_cl * speed ** 2
 
         # Direction: perpendicular to velocity, determined by spin direction
         # For positive spin (backspin), force is perpendicular and "up" relative to velocity
@@ -263,14 +273,14 @@ class PhysicsEngine:
 
     def compute_spin_decay(self, spin: float, vx: float, vy: float, dt: float) -> float:
         """
-        Compute spin decay due to air resistance on rotating body.
-        Uses exponential decay model with velocity-dependent time constant.
-        """
-        speed = np.sqrt(vx ** 2 + vy ** 2)
+        Apply optional exponential spin decay.
 
-        # Spin decay time constant (empirical, ~2-5 seconds typically)
-        # Faster movement = more air interaction = faster decay
-        tau = 3.0 / (1.0 + 0.1 * speed)
+        FUEL spin-down has not been calibrated, so the default is no decay.
+        If a measured 1/e time constant is supplied on the game piece, use it.
+        """
+        tau = self.piece.spin_decay_time_constant
+        if tau is None or tau <= 0.0:
+            return spin
 
         return spin * np.exp(-dt / tau)
 
@@ -1055,8 +1065,10 @@ if __name__ == "__main__":
     target = Target(
         name="Hub (2026 REBUILT)",
         position=(0, 1.828),  # 72 inches height
-        entry_radius=0.302,  # 11.9 inch radius (inner hole)
-        funnel_radius=0.529,  # 20.85 inch radius (outer funnel)
+        # 41.7 in across-flats opening -> 20.85 in apothem. Subtract the
+        # 2.955 in FUEL radius to approximate allowable ball-center clearance.
+        entry_radius=0.454,
+        funnel_radius=0.529,
         height_at_funnel=1.828  # Simplified for top-down entry
     )
 
