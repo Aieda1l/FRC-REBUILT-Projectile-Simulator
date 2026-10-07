@@ -34,6 +34,7 @@ export function simulateShot(params, options = {}) {
     launchY,
     velocity,
     angleDeg,
+    azimuthDeg = 0,
     spinRPM,
     mass,
     radius,
@@ -55,11 +56,21 @@ export function simulateShot(params, options = {}) {
   } = params;
 
   const angle = angleDeg * DEG_TO_RAD;
+  const azimuth = azimuthDeg * DEG_TO_RAD;
   const spin = spinRPM * 2 * Math.PI / 60;
+  const horizontalSpeed = velocity * Math.cos(angle);
   const initial = launchState(
     [launchX, 0, launchY],
-    [velocity * Math.cos(angle), 0, velocity * Math.sin(angle)],
-    [0, -spin, 0],
+    [
+      horizontalSpeed * Math.cos(azimuth),
+      horizontalSpeed * Math.sin(azimuth),
+      velocity * Math.sin(angle),
+    ],
+    [
+      spin * Math.sin(azimuth),
+      -spin * Math.cos(azimuth),
+      0,
+    ],
     robotVelocity,
   );
   const flightParams = {

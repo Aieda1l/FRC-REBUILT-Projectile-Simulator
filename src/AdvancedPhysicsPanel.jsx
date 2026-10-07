@@ -25,6 +25,8 @@ function probability(value) {
 }
 
 export default function AdvancedPhysicsPanel({
+    aimAzimuth,
+    onAimAzimuthChange,
     robotVelocity,
     onRobotVelocityChange,
     wind,
@@ -97,6 +99,9 @@ export default function AdvancedPhysicsPanel({
                     <section>
                         <h3 className="text-sm font-semibold text-slate-200 mb-2">Motion & Environment</h3>
                         <div className="grid grid-cols-2 gap-2">
+                            <NumberField label="Aim Azimuth" value={aimAzimuth}
+                                         onChange={onAimAzimuthChange}
+                                         step={0.5} min={-90} max={90} unit="°"/>
                             <NumberField label="Robot Forward Velocity" value={robotVelocity[0]}
                                          onChange={(value) => setVector(robotVelocity, onRobotVelocityChange, 0, value)}
                                          step={0.1} unit="m/s"/>

@@ -1,6 +1,10 @@
 import {simulateShot} from './trajectory2d.js';
 import {evaluateShotUncertainty} from './uncertainty.js';
 
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
+const EPS = 1e-12;
+
 const CLASSIFICATION_RANK = {
   'clean-entry': 3,
   'rim-collision': 2,
@@ -12,7 +16,35 @@ function referenceDistance(candidate, reference) {
   return Math.hypot(
     (candidate.velocity ?? reference.velocity) - reference.velocity,
     (candidate.angle ?? reference.angle) - reference.angle,
+    (candidate.azimuth ?? reference.azimuth) - reference.azimuth,
   );
+}
+
+function lateralCompensation(params, velocity, angle) {
+  const robotLateral = Number(params.robotVelocity?.[1] ?? 0);
+  const referenceAzimuth = Number(params.azimuthDeg ?? 0);
+  if (!Number.isFinite(robotLateral) || !Number.isFinite(referenceAzimuth)) {
+    throw new RangeError('robot lateral velocity and azimuth must be finite');
+  }
+  if (Math.abs(robotLateral) <= EPS) {
+    return {azimuth: referenceAzimuth, feasible: true};
+  }
+
+  const horizontalSpeed = velocity * Math.cos(angle * DEG_TO_RAD);
+  if (horizontalSpeed <= EPS) {
+    return {
+      azimuth: -Math.sign(robotLateral) * 90,
+      feasible: false,
+    };
+  }
+
+  const ratio = -robotLateral / horizontalSpeed;
+  const feasible = Math.abs(ratio) <= 1 + EPS;
+  const clampedRatio = Math.max(-1, Math.min(1, ratio));
+  return {
+    azimuth: Math.asin(clampedRatio) * RAD_TO_DEG,
+    feasible,
+  };
 }
 
 export function rankCandidate(a, b, reference) {
@@ -64,7 +96,11 @@ function numericRange(start, end, step) {
 }
 
 function createEvaluator(params, callbacks, totalCandidates) {
-  const reference = {velocity: params.velocity, angle: params.angleDeg};
+  const reference = {
+    velocity: params.velocity,
+    angle: params.angleDeg,
+    azimuth: params.azimuthDeg ?? 0,
+  };
   const cache = new Map();
   let evaluatedCandidates = 0;
   let bestCandidate = null;
@@ -73,11 +109,23 @@ function createEvaluator(params, callbacks, totalCandidates) {
     const key = `${velocity.toFixed(8)}|${angle.toFixed(8)}|${dt.toFixed(8)}`;
     if (cache.has(key)) return cache.get(key);
 
+    const compensation = lateralCompensation(params, velocity, angle);
     const result = simulateShot(
-      {...params, velocity, angleDeg: angle},
+      {
+        ...params,
+        velocity,
+        angleDeg: angle,
+        azimuthDeg: compensation.azimuth,
+      },
       {dt},
     );
-    const candidate = {velocity, angle, result};
+    const candidate = {
+      velocity,
+      angle,
+      azimuth: compensation.azimuth,
+      lateralCompensationFeasible: compensation.feasible,
+      result,
+    };
     cache.set(key, candidate);
     evaluatedCandidates += 1;
 
@@ -137,6 +185,9 @@ function finalize(candidates, evaluator) {
   const bestNearMiss = ranked.find(
     (candidate) => candidate.result.hubInteraction.classification !== 'clean-entry',
   ) ?? null;
+  const anyLateralCompensationFeasible = ranked.some(
+    (candidate) => candidate.lateralCompensationFeasible !== false,
+  );
 
   for (const candidate of ranked) {
     if (candidate.result.hubInteraction.classification !== 'clean-entry') continue;
@@ -156,6 +207,7 @@ function finalize(candidates, evaluator) {
     solution: null,
     bestNearMiss: bestNearMiss ?? evaluator.bestCandidate,
     evaluatedCandidates: evaluator.evaluatedCandidates,
+    reason: anyLateralCompensationFeasible ? null : 'lateral-compensation-infeasible',
   };
 }
 
@@ -260,7 +312,12 @@ export function optimizeRobust(params, {
   const shortlist = (clean.length ? clean : ranked).slice(0, 10);
   const robustCandidates = shortlist.map((candidate, index) => {
     const robust = evaluateShotUncertainty(
-      {...params, velocity: candidate.velocity, angleDeg: candidate.angle},
+      {
+        ...params,
+        velocity: candidate.velocity,
+        angleDeg: candidate.angle,
+        azimuthDeg: candidate.azimuth,
+      },
       uncertainty,
       {sampleCount: coarseSamples, seed, dt: 0.002},
     );
@@ -291,7 +348,12 @@ export function optimizeRobust(params, {
     };
   }
 
-  const finalParams = {...params, velocity: best.velocity, angleDeg: best.angle};
+  const finalParams = {
+    ...params,
+    velocity: best.velocity,
+    angleDeg: best.angle,
+    azimuthDeg: best.azimuth,
+  };
   const result = simulateShot(finalParams, {dt: 0.001});
   if (result.hubInteraction.classification !== 'clean-entry') {
     return {
@@ -307,7 +369,13 @@ export function optimizeRobust(params, {
     dt: 0.001,
   });
   return {
-    solution: {velocity: best.velocity, angle: best.angle, result, robust},
+    solution: {
+      velocity: best.velocity,
+      angle: best.angle,
+      azimuth: best.azimuth,
+      result,
+      robust,
+    },
     bestNearMiss,
     evaluatedCandidates: search.evaluator.evaluatedCandidates,
     monteCarloEvaluations: robustCandidates.length + 1,

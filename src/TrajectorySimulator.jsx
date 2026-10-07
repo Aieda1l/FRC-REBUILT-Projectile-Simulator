@@ -115,6 +115,7 @@ export default function TrajectorySimulator() {
     const [launchY, setLaunchY] = useState(0.5);
     const [velocity, setVelocity] = useState(12.0);
     const [angle, setAngle] = useState(55);
+    const [azimuth, setAzimuth] = useState(0);
     const [spinRPM, setSpinRPM] = useState(2000);
 
     // Backspin estimator parameters
@@ -198,7 +199,7 @@ export default function TrajectorySimulator() {
 
     // Build params object. Calibration profiles only replace aerodynamic model fields.
     const params = useMemo(() => applyCalibrationProfile({
-        launchX, launchY, velocity, angleDeg: angle, spinRPM,
+        launchX, launchY, velocity, angleDeg: angle, azimuthDeg: azimuth, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
         targetX,
@@ -206,7 +207,7 @@ export default function TrajectorySimulator() {
         robotVelocity,
         wind,
     }, calibrationProfile), [
-        launchX, launchY, velocity, angle, spinRPM, enableDrag, enableMagnus,
+        launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
         targetX, robotVelocity, wind, calibrationProfile,
     ]);
 
@@ -222,7 +223,18 @@ export default function TrajectorySimulator() {
             if (optimization.solution) {
                 setVelocity(Math.round(optimization.solution.velocity * 10) / 10);
                 setAngle(Math.round(optimization.solution.angle * 10) / 10);
-                setOptimizerStatus('Clean entry found');
+                if (Number.isFinite(optimization.solution.azimuth)) {
+                    setAzimuth(Math.round(optimization.solution.azimuth * 10) / 10);
+                }
+                setOptimizerStatus(
+                    Number.isFinite(optimization.solution.azimuth)
+                        ? `Clean entry found (azimuth ${optimization.solution.azimuth.toFixed(1)}°)`
+                        : 'Clean entry found'
+                );
+            } else if (optimization.reason === 'lateral-compensation-infeasible') {
+                setOptimizerStatus(
+                    'No clean entry: lateral robot velocity exceeds the available horizontal muzzle speed at this elevation. Try Best V + Angle.'
+                );
             } else {
                 const near = optimization.bestNearMiss?.result?.hubInteraction?.classification;
                 setOptimizerStatus(near ? `No clean entry found (best: ${near})` : 'No clean entry found');
@@ -556,6 +568,8 @@ export default function TrajectorySimulator() {
                         </div>
 
                         <AdvancedPhysicsPanel
+                            aimAzimuth={azimuth}
+                            onAimAzimuthChange={setAzimuth}
                             robotVelocity={robotVelocity}
                             onRobotVelocityChange={setRobotVelocity}
                             wind={wind}
