@@ -2,13 +2,14 @@ name: One-shot Milestone 2 tree sync
 
 on:
   push:
+    branches:
+      - milestone-2-rk45-3d-engine
 
 permissions:
   contents: write
 
 jobs:
   sync-reviewed-tree:
-    if: github.ref == 'refs/heads/milestone-2-rk45-3d-engine' && github.event.head_commit.message == 'chore: sync Milestone 2 reviewed tree'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
