@@ -24,6 +24,7 @@ from .physics3d import (
     integrate_trajectory,
     launch_state,
 )
+from .uncertainty import CLASSIFICATIONS, classify_hub_samples
 
 CALIBRATION_SCHEMA = "frc-projectile-calibration-v1"
 
@@ -494,6 +495,14 @@ def validate_profile(
     vertical_errors: list[float] = []
     downrange_errors: list[float] = []
     hub_plane_errors: list[float] = []
+    entry_angle_errors: list[float] = []
+    clean_entry_confusion = {
+        "truePositive": 0,
+        "trueNegative": 0,
+        "falsePositive": 0,
+        "falseNegative": 0,
+    }
+    labeled_hub_results = 0
     reynolds_values: list[float] = []
     spin_values: list[float] = []
     clamped = 0
@@ -535,6 +544,46 @@ def validate_profile(
             if observation.get("hubPlane"):
                 hub_plane_errors.append(float(np.linalg.norm(delta)))
 
+        observed_hub_result = shot.get("observedHubResult")
+        observed_entry_angle = shot.get("observedEntryAngle")
+        if observed_hub_result is not None or observed_entry_angle is not None:
+            interaction = classify_hub_samples(
+                samples,
+                float(shot.get("targetX", 0.0)),
+                float(shot.get("targetLateralY", 0.0)),
+                params.radius,
+            )
+            if observed_hub_result is not None:
+                if observed_hub_result not in CLASSIFICATIONS:
+                    raise ValueError(
+                        "observedHubResult must be clean-entry, rim-collision, "
+                        "funnel-collision, or miss"
+                    )
+                labeled_hub_results += 1
+                predicted_clean = interaction["classification"] == "clean-entry"
+                observed_clean = observed_hub_result == "clean-entry"
+                if predicted_clean and observed_clean:
+                    clean_entry_confusion["truePositive"] += 1
+                elif predicted_clean and not observed_clean:
+                    clean_entry_confusion["falsePositive"] += 1
+                elif not predicted_clean and observed_clean:
+                    clean_entry_confusion["falseNegative"] += 1
+                else:
+                    clean_entry_confusion["trueNegative"] += 1
+
+            if observed_entry_angle is not None:
+                top_crossing = interaction.get("topCrossing")
+                if top_crossing is not None:
+                    state = top_crossing["state"]
+                    predicted_angle = math.degrees(
+                        math.atan2(
+                            float(state[5]),
+                            math.hypot(float(state[3]), float(state[4])),
+                        )
+                    )
+                    measured_angle = _finite(observed_entry_angle, "observedEntryAngle")
+                    entry_angle_errors.append(predicted_angle - measured_angle)
+
     if not errors:
         raise ValueError("validation requires at least one observation")
     matrix = np.asarray(errors)
@@ -546,6 +595,13 @@ def validate_profile(
         "hubPlaneRms": (
             float(np.sqrt(np.mean(np.square(hub_plane_errors))))
             if hub_plane_errors else None
+        ),
+        "entryAngleRms": (
+            float(np.sqrt(np.mean(np.square(entry_angle_errors))))
+            if entry_angle_errors else None
+        ),
+        "cleanEntryConfusion": (
+            clean_entry_confusion if labeled_hub_results else None
         ),
         "reynoldsRange": [min(reynolds_values), max(reynolds_values)],
         "spinParameterRange": [min(spin_values), max(spin_values)],

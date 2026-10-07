@@ -263,7 +263,7 @@ def _panel_clearance(state, normal, geometry, ball_radius):
     return numerator / math.sqrt(1 + geometry["slope"] ** 2) - ball_radius
 
 
-def _classify(samples, center_x, center_y, ball_radius):
+def classify_hub_samples(samples, center_x, center_y, ball_radius):
     geometry = _geometry(center_x, center_y)
     top = _descending_crossing(samples, geometry["top_z"])
     if top is None:
@@ -327,7 +327,7 @@ def _simulate_shot(params, dt):
         spin_decay_time_constant=params.get("spinDecayTimeConstant"),
     )
     samples = integrate_trajectory(initial, flight, method="rk4", dt=dt, max_time=5.0)
-    interaction = _classify(
+    interaction = classify_hub_samples(
         samples, params.get("targetX", 0.0), params.get("targetLateralY", 0.0), params["radius"]
     )
     entry_velocity = entry_angle = None
