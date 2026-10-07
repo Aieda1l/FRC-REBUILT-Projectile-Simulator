@@ -1,5 +1,6 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
 import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
+import {summarizeCalibrationDomain} from './calibration.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -42,6 +43,8 @@ export function simulateShot(params, options = {}) {
     dynamicViscosity,
     dragModel,
     liftModel,
+    spinDecayTimeConstant,
+    calibrationProfile = null,
     gravity,
     enableDrag,
     enableMagnus,
@@ -69,6 +72,7 @@ export function simulateShot(params, options = {}) {
     wind,
     dragModel,
     liftModel,
+    spinDecayTimeConstant,
     ...(dynamicViscosity === undefined ? {} : {dynamicViscosity}),
     enableDrag,
     enableMagnus,
@@ -81,6 +85,10 @@ export function simulateShot(params, options = {}) {
     terminalHeight: 0,
     terminalDirection: -1,
   });
+
+  const calibrationDiagnostics = calibrationProfile
+    ? summarizeCalibrationDomain(samples3d, flightParams, calibrationProfile)
+    : null;
 
   const hubGeometry = createHubGeometry({
     centerX: targetX,
@@ -119,6 +127,7 @@ export function simulateShot(params, options = {}) {
   return {
     samples3d,
     points,
+    calibrationDiagnostics,
     hubGeometry,
     hubInteraction,
     hitTarget,
