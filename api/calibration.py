@@ -215,7 +215,7 @@ def _flight_parameters_for_shot(
         kwargs["air_density"] = float(shot["airDensity"])
     if "dynamicViscosity" in shot:
         kwargs["dynamic_viscosity"] = float(shot["dynamicViscosity"])
-    kwargs["wind"] = tuple(shot.get("wind", kwargs.get("wind", (0.0, 0.0, 0.0)))
+    kwargs["wind"] = tuple(shot.get("wind", kwargs.get("wind", (0.0, 0.0, 0.0))))
     kwargs["drag_model"] = drag_model
     kwargs["lift_model"] = lift_model
     kwargs["spin_decay_time_constant"] = spin_decay_time_constant
