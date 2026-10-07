@@ -257,12 +257,12 @@ test('simulateShot returns canonical 3-D samples and x/z projection from the sam
 });
 
 test('hitTarget is true only for clean entry', () => {
-  const clean = knownCleanFixture();
+  const clean = simulateShot(vacuumShotThroughTopAt(-0.30));
   assert.equal(clean.hubInteraction.classification, 'clean-entry');
   assert.equal(clean.hitTarget, true);
 
-  const collision = knownFunnelCollisionFixture();
-  assert.notEqual(collision.hubInteraction.classification, 'clean-entry');
+  const collision = simulateShot(vacuumShotThroughTopAt(0.42));
+  assert.equal(collision.hubInteraction.classification, 'funnel-collision');
   assert.equal(collision.hitTarget, false);
 });
 ```
@@ -272,6 +272,23 @@ test('hitTarget is true only for clean entry', () => {
 In `tests/ui_contract_js.test.mjs`, read `src/trajectory2d.js` and assert the source contains exactly one production call site matching `integrateTrajectory(`.
 
 This test intentionally protects the acceptance requirement that target analysis consumes one integration rather than adding a second target-plane integration again.
+
+The test helper `vacuumShotThroughTopAt(xCross)` uses `launchX=-3`, `launchY=0.5`, `vx=2 m/s`, drag/Magnus disabled, and computes the required initial `vz` so the vacuum parabola is descending through `HUB_DIMENSIONS.topZ` at the requested `xCross`:
+
+```javascript
+const t = (xCross - launchX) / vx;
+const vz = (HUB_DIMENSIONS.topZ - launchY + 0.5 * 9.81 * t * t) / t;
+return {
+  ...baseParams(),
+  launchX, launchY,
+  velocity: Math.hypot(vx, vz),
+  angleDeg: Math.atan2(vz, vx) * 180 / Math.PI,
+  enableDrag: false,
+  enableMagnus: false,
+};
+```
+
+This yields a deterministic clean center-biased passage at `xCross=-0.30` and a deterministic top-valid/funnel-collision case at `xCross=0.42`.
 
 - [ ] **Step 3: Pin optimizer timestep override semantics**
 
@@ -323,7 +340,7 @@ git commit -m "refactor: score HUB from one integrated trajectory"
 **Interfaces:**
 - Consumes: `simulateShot(params, {dt})` from Task 3.
 - Produces:
-  - `rankCandidate(a, b, reference)`
+  - `rankCandidate(a, b, reference)` as an `Array.sort`-style comparator: negative means `a` ranks ahead of `b`
   - `optimizeAngle(params, callbacks = {})`
   - `optimizeVelocity(params, callbacks = {})`
   - `optimizeBoth(params, callbacks = {})`
@@ -336,22 +353,54 @@ git commit -m "refactor: score HUB from one integrated trajectory"
 Pin ranking order:
 
 ```javascript
-test('clean entry always outranks collision and miss', () => { ... });
-test('larger positive clearance wins between clean entries', () => { ... });
-test('less-negative clearance wins between collisions', () => { ... });
-test('smaller miss distance wins between misses', () => { ... });
-test('exact ties prefer parameters closest to the reference', () => { ... });
+const candidate = (classification, clearanceMargin, missDistance, velocity, angle) => ({
+  velocity,
+  angle,
+  result: {hubInteraction: {classification, clearanceMargin, missDistance}},
+});
+
+test('clean entry always outranks collision and miss', () => {
+  const clean = candidate('clean-entry', 0.01, 0, 10, 50);
+  const collision = candidate('funnel-collision', -0.001, 0, 10, 50);
+  const miss = candidate('miss', -0.2, 0.001, 10, 50);
+  assert.ok(rankCandidate(clean, collision, {velocity: 10, angle: 50}) < 0);
+  assert.ok(rankCandidate(clean, miss, {velocity: 10, angle: 50}) < 0);
+});
+
+test('larger positive clearance wins between clean entries', () => {
+  const a = candidate('clean-entry', 0.03, 0, 10, 50);
+  const b = candidate('clean-entry', 0.01, 0, 10, 50);
+  assert.ok(rankCandidate(a, b, {velocity: 10, angle: 50}) < 0);
+});
+
+test('less-negative clearance wins between collisions', () => {
+  const a = candidate('rim-collision', -0.002, 0, 10, 50);
+  const b = candidate('funnel-collision', -0.02, 0, 10, 50);
+  assert.ok(rankCandidate(a, b, {velocity: 10, angle: 50}) < 0);
+});
+
+test('smaller miss distance wins between misses', () => {
+  const a = candidate('miss', -0.2, 0.01, 10, 50);
+  const b = candidate('miss', -0.2, 0.10, 10, 50);
+  assert.ok(rankCandidate(a, b, {velocity: 10, angle: 50}) < 0);
+});
+
+test('exact ties prefer parameters closest to the reference', () => {
+  const a = candidate('miss', -0.2, 0.01, 10.1, 50.1);
+  const b = candidate('miss', -0.2, 0.01, 14, 60);
+  assert.ok(rankCandidate(a, b, {velocity: 10, angle: 50}) < 0);
+});
 ```
 
 Use hand-built candidate objects so ranking tests do not depend on flight physics.
 
 - [ ] **Step 2: Write failing optimizer behavior tests**
 
-Using real `simulateShot`, add one known-solvable fixture for each mode:
+Using real `simulateShot`, define `makeVacuumCleanParams()` from the Task 3 helper with `xCross=-0.30`. It has `launchX=-3`, `launchY=0.5`, `vx=2 m/s`, and analytically computed `vz`, with drag/Magnus disabled.
 
-- angle-only returns a `clean-entry`;
-- velocity-only returns a `clean-entry`;
-- combined returns a `clean-entry`.
+- angle-only: hold its derived velocity fixed and assert the returned solution is `clean-entry`;
+- velocity-only: hold its derived angle fixed and assert the returned solution is `clean-entry`;
+- combined: start from the same launch/environment and assert the returned solution is `clean-entry`.
 
 For combined search assert:
 
@@ -438,11 +487,76 @@ git commit -m "feat: add bounded coarse-to-fine optimizer"
 Pin:
 
 ```javascript
-test('start posts one request and cancel terminates active worker', () => { ... });
-test('starting a new optimization terminates the previous worker', () => { ... });
-test('stale completion from an old request is ignored', () => { ... });
-test('completion terminates and clears the active worker', () => { ... });
-test('dispose terminates an active worker', () => { ... });
+class FakeWorker {
+  constructor() {
+    this.posted = [];
+    this.terminated = false;
+    this.onmessage = null;
+    this.onerror = null;
+  }
+  postMessage(message) { this.posted.push(message); }
+  terminate() { this.terminated = true; }
+}
+
+test('start posts one request and cancel terminates active worker', () => {
+  const workers = [];
+  const client = createOptimizerClient({
+    workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+  });
+  const requestId = client.start('angle', {velocity: 10});
+  assert.deepEqual(workers[0].posted[0], {
+    type: 'optimize', requestId, mode: 'angle', params: {velocity: 10},
+  });
+  client.cancel();
+  assert.equal(workers[0].terminated, true);
+});
+
+test('starting a new optimization terminates the previous worker', () => {
+  const workers = [];
+  const client = createOptimizerClient({
+    workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+  });
+  client.start('angle', {});
+  client.start('velocity', {});
+  assert.equal(workers[0].terminated, true);
+  assert.equal(workers.length, 2);
+});
+
+test('stale completion from an old request is ignored', () => {
+  const workers = [];
+  const completed = [];
+  const client = createOptimizerClient({
+    workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+    onComplete: (result) => completed.push(result),
+  });
+  const oldId = client.start('angle', {});
+  const oldHandler = workers[0].onmessage;
+  const newId = client.start('velocity', {});
+  oldHandler({data: {type: 'complete', requestId: oldId, result: {solution: 'old'}}});
+  assert.equal(completed.length, 0);
+  workers[1].onmessage({data: {type: 'complete', requestId: newId, result: {solution: 'new'}}});
+  assert.deepEqual(completed, [{solution: 'new'}]);
+});
+
+test('completion terminates the active worker', () => {
+  const workers = [];
+  const client = createOptimizerClient({
+    workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+  });
+  const requestId = client.start('angle', {});
+  workers[0].onmessage({data: {type: 'complete', requestId, result: {solution: null}}});
+  assert.equal(workers[0].terminated, true);
+});
+
+test('dispose terminates an active worker', () => {
+  const workers = [];
+  const client = createOptimizerClient({
+    workerFactory: () => { const worker = new FakeWorker(); workers.push(worker); return worker; },
+  });
+  client.start('both', {});
+  client.dispose();
+  assert.equal(workers[0].terminated, true);
+});
 ```
 
 The fake worker implements only `postMessage`, `terminate`, and assignable `onmessage/onerror`; assertions are against real client behavior, not mocked optimizer logic.
