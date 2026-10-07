@@ -13,10 +13,11 @@ const CLASSIFICATION_RANK = {
 };
 
 function referenceDistance(candidate, reference) {
+  const referenceAzimuth = reference.azimuth ?? 0;
   return Math.hypot(
     (candidate.velocity ?? reference.velocity) - reference.velocity,
     (candidate.angle ?? reference.angle) - reference.angle,
-    (candidate.azimuth ?? reference.azimuth) - reference.azimuth,
+    (candidate.azimuth ?? referenceAzimuth) - referenceAzimuth,
   );
 }
 
