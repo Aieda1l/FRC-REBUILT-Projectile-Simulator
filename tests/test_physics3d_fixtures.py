@@ -16,6 +16,8 @@ class Physics3DFixtureTests(unittest.TestCase):
                 "robot_velocity",
                 "spin_decay",
                 "rk45",
+                "calibrated_drag_wind_robot",
+                "calibrated_lift_wind_robot",
             ],
         )
 
@@ -23,6 +25,12 @@ class Physics3DFixtureTests(unittest.TestCase):
         fixture = build_fixture()
         self.assertEqual(fixture["schema"], "physics3d-golden-v1")
         self.assertEqual([case["name"] for case in fixture["cases"]], CASE_NAMES)
+        drag_case = next(case for case in fixture["cases"] if case["name"] == "calibrated_drag_wind_robot")
+        lift_case = next(case for case in fixture["cases"] if case["name"] == "calibrated_lift_wind_robot")
+        self.assertEqual(drag_case["params"]["dragModel"]["kind"], "table1d")
+        self.assertEqual(lift_case["params"]["liftModel"]["kind"], "table2d")
+        self.assertNotEqual(drag_case["params"]["wind"], [0.0, 0.0, 0.0])
+        self.assertNotEqual(lift_case["params"]["wind"], [0.0, 0.0, 0.0])
 
 
 if __name__ == "__main__":
