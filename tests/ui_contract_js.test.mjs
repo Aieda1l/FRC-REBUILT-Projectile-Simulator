@@ -39,25 +39,24 @@ test('TrajectorySimulator delegates optimization to worker client with cancel UI
   assert.doesNotMatch(source, /const findOptimalBoth\s*=/);
 });
 
-
-test('TrajectorySimulator uses shared HUB geometry for 2-D and 3-D views', async () => {
+test('TrajectorySimulator offers shared-geometry 2-D and 3-D target views', async () => {
   const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
-  assert.match(source, /HUB_DIMENSIONS/);
-  assert.match(source, /createHubGeometry/);
+  assert.match(source, /hubGeometry/);
   assert.match(source, /Trajectory3DView/);
-  assert.match(source, /2-D/);
-  assert.match(source, /3-D/);
+  assert.match(source, />2-D</);
+  assert.match(source, />3-D</);
   assert.doesNotMatch(source, /0\.529/);
   assert.doesNotMatch(source, /0\.454/);
-  for (const label of ['CLEAN ENTRY', 'RIM COLLISION', 'FUNNEL COLLISION', 'MISS']) {
-    assert.match(source, new RegExp(label));
-  }
+  for (const label of ['CLEAN ENTRY', 'RIM COLLISION', 'FUNNEL COLLISION', 'MISS']) assert.match(source, new RegExp(label));
+});
+test('Trajectory3DView exposes camera presets and a trajectory scrubber', async () => {
+  const source = await readFile(new URL('../src/Trajectory3DView.jsx', import.meta.url), 'utf8');
+  assert.match(source, /CAMERA_PRESETS/);
+  for (const label of ['Isometric','Front','Side','Top']) assert.match(source, new RegExp(label));
+  assert.match(source, /type=["']range["']/);
 });
 
-
-test('worker and progress UI share totalCandidates field', async () => {
-  const worker = await readFile(new URL('../src/optimizer.worker.js', import.meta.url), 'utf8');
-  const ui = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
-  assert.match(worker, /totalCandidates/);
-  assert.match(ui, /optimizerProgress\.totalCandidates/);
+test('Toggle knob visibly follows checked state without relying on nested peer selector', async () => {
+  const source = await readFile(new URL('../src/Toggle.jsx', import.meta.url), 'utf8');
+  assert.match(source, /checked\s*\?\s*['"]translate-x-5['"]\s*:\s*['"]translate-x-0\.5['"]/);
 });

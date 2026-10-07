@@ -8,6 +8,12 @@ import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
 // Physics constants and utilities
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
+const HUB_STATUS_LABELS = {
+    'clean-entry': 'CLEAN ENTRY',
+    'rim-collision': 'RIM COLLISION',
+    'funnel-collision': 'FUNNEL COLLISION',
+    miss: 'MISS',
+};
 
 // Backspin estimator for hooded flywheel shooters
 // This remains a rough launcher heuristic until shooter exit spin is measured.
@@ -121,24 +127,21 @@ export default function TrajectorySimulator() {
     const [enableMagnus, setEnableMagnus] = useState(true);
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
+    const [viewMode, setViewMode] = useState('2d');
 
     // Optimizer status
     const [optimizerRunning, setOptimizerRunning] = useState(false);
     const [optimizerProgress, setOptimizerProgress] = useState(null);
     const [optimizerStatus, setOptimizerStatus] = useState('');
-    const [viewMode, setViewMode] = useState('2d');
 
     // Error margins
     const [velError, setVelError] = useState(0.5);
     const [angleError, setAngleError] = useState(1.0);
 
-    // HUB target geometry comes from the shared official-dimension model.
+    // Target geometry shared by scoring, 2-D rendering, and 3-D rendering.
     const targetX = 0;
     const targetY = HUB_DIMENSIONS.topZ;
-    const hubGeometry = useMemo(
-        () => createHubGeometry({centerX: targetX, centerY: 0}),
-        [targetX]
-    );
+    const hubGeometry = useMemo(() => createHubGeometry({centerX: targetX, centerY: 0}), [targetX]);
 
     // Game piece (FUEL 2026)
     // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
@@ -174,7 +177,7 @@ export default function TrajectorySimulator() {
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
         targetX
-    }), [launchX, launchY, velocity, angle, spinRPM, enableDrag, enableMagnus]);
+    }), [launchX, launchY, velocity, angle, spinRPM, enableDrag, enableMagnus, targetX]);
 
     // Run simulation
     const optimizerClient = useMemo(() => createOptimizerClient({
@@ -320,23 +323,22 @@ export default function TrajectorySimulator() {
         );
     }, [envelopeResults, toSVG]);
 
-    // 2-D HUB profile uses the same shared geometry as collision scoring and the 3-D view.
+    // Side-profile target visualization from the same HUB geometry used for scoring.
     const targetVis = useMemo(() => ({
-        center: toSVG(hubGeometry.centerX, hubGeometry.topZ),
-        topLeft: toSVG(hubGeometry.centerX - hubGeometry.topApothem, hubGeometry.topZ),
-        topRight: toSVG(hubGeometry.centerX + hubGeometry.topApothem, hubGeometry.topZ),
-        bottomLeft: toSVG(hubGeometry.centerX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        bottomRight: toSVG(hubGeometry.centerX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
-    }), [toSVG, hubGeometry]);
+        center: toSVG(targetX, hubGeometry.topZ),
+        topLeft: toSVG(targetX - hubGeometry.topApothem, hubGeometry.topZ),
+        topRight: toSVG(targetX + hubGeometry.topApothem, hubGeometry.topZ),
+        bottomLeft: toSVG(targetX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
+        bottomRight: toSVG(targetX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
+        topClearLeft: toSVG(targetX - Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
+        topClearRight: toSVG(targetX + Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
+        bottomClearLeft: toSVG(targetX - Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
+        bottomClearRight: toSVG(targetX + Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
+    }), [toSVG, targetX, hubGeometry, radius]);
 
-    const classification = result.hubInteraction?.classification ?? 'miss';
-    const classificationLabel = {
-        'clean-entry': 'CLEAN ENTRY',
-        'rim-collision': 'RIM COLLISION',
-        'funnel-collision': 'FUNNEL COLLISION',
-        miss: 'MISS',
-    }[classification] ?? 'MISS';
-    const cleanEntry = classification === 'clean-entry';
+    const hubClassification = result.hubInteraction?.classification ?? 'miss';
+    const hubStatus = HUB_STATUS_LABELS[hubClassification] ?? HUB_STATUS_LABELS.miss;
+    const cleanEntry = hubClassification === 'clean-entry';
 
     const launchVis = useMemo(() => toSVG(launchX, launchY), [toSVG, launchX, launchY]);
     const impactVis = useMemo(() => result.impactPoint ? toSVG(result.impactPoint.x, result.impactPoint.y) : null, [toSVG, result]);
@@ -496,10 +498,10 @@ export default function TrajectorySimulator() {
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
                             <h2 className="text-lg font-semibold text-indigo-400 mb-3">Results</h2>
                             <ResultItem
-                                label="HUB Result"
-                                value={classificationLabel}
+                                label="Hit Target"
+                                value={result.hitTarget ? '✓ YES' : '✗ NO'}
                                 unit=""
-                                highlight={cleanEntry}
+                                highlight={result.hitTarget}
                             />
                             <ResultItem label="Flight Time" value={result.flightTime.toFixed(3)} unit="s"/>
                             <ResultItem label="Max Height" value={result.maxHeight.toFixed(2)} unit="m"/>
@@ -523,28 +525,18 @@ export default function TrajectorySimulator() {
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
                             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                 <h2 className="text-lg font-semibold text-indigo-400">Trajectory Graph</h2>
-                                <div className="flex rounded-lg border border-slate-600 overflow-hidden">
-                                    <button type="button" onClick={() => setViewMode('2d')}
-                                        className={`px-3 py-1 text-xs ${viewMode === '2d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>
-                                        2-D
-                                    </button>
-                                    <button type="button" onClick={() => setViewMode('3d')}
-                                        className={`px-3 py-1 text-xs ${viewMode === '3d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>
-                                        3-D
-                                    </button>
+                                <div className="flex items-center gap-2">
+                                    <div className="flex rounded-lg border border-slate-600 overflow-hidden" aria-label="Trajectory view">
+                                        <button type="button" onClick={() => setViewMode('2d')} className={`px-3 py-1 text-xs ${viewMode === '2d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>2-D</button>
+                                        <button type="button" onClick={() => setViewMode('3d')} className={`px-3 py-1 text-xs ${viewMode === '3d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>3-D</button>
+                                    </div>
+                                    <span className={`px-3 py-1 rounded-full text-sm font-semibold ${cleanEntry ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-red-500/20 text-red-400 border border-red-500/50'}`}>{hubStatus}</span>
                                 </div>
-                                <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
-                                    cleanEntry
-                                        ? 'bg-green-500/20 text-green-400 border border-green-500/50'
-                                        : classification === 'miss'
-                                            ? 'bg-red-500/20 text-red-400 border border-red-500/50'
-                                            : 'bg-amber-500/20 text-amber-300 border border-amber-500/50'
-                                }`}>
-                                    {classificationLabel}
-                                </span>
                             </div>
 
-                            {viewMode === '2d' ? (
+                            {viewMode === '3d' ? (
+                                <Trajectory3DView samples={result.samples3d} hubGeometry={hubGeometry} interaction={result.hubInteraction} ballRadius={radius} />
+                            ) : (
                             <svg viewBox="0 0 600 400" className="w-full h-auto bg-slate-900/50 rounded-lg">
                                 {/* Grid */}
                                 <defs>
@@ -554,24 +546,20 @@ export default function TrajectorySimulator() {
                                 </defs>
                                 <rect width="600" height="400" fill="url(#grid)"/>
 
-                                {/* HUB funnel side profile from shared collision geometry */}
+                                {/* Target funnel */}
                                 <path
-                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y}
+                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y} 
                       L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
                       L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
-                      L ${targetVis.topRight.x} ${targetVis.topRight.y} Z`}
-                                    fill="rgba(34, 197, 94, 0.08)"
+                      L ${targetVis.topRight.x} ${targetVis.topRight.y}`}
+                                    fill="rgba(34, 197, 94, 0.1)"
                                     stroke="#22c55e"
-                                    strokeWidth="2"
-                                />
-                                <line
-                                    x1={targetVis.topLeft.x}
-                                    y1={targetVis.topLeft.y}
-                                    x2={targetVis.topRight.x}
-                                    y2={targetVis.topRight.y}
-                                    stroke="#4ade80"
                                     strokeWidth="3"
                                 />
+                                <line x1={targetVis.topClearLeft.x} y1={targetVis.topClearLeft.y} x2={targetVis.topClearRight.x} y2={targetVis.topClearRight.y}
+                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                <line x1={targetVis.bottomClearLeft.x} y1={targetVis.bottomClearLeft.y} x2={targetVis.bottomClearRight.x} y2={targetVis.bottomClearRight.y}
+                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
 
                                 {/* Error envelope */}
                                 {envelopePaths.map((path, i) => (
@@ -640,13 +628,6 @@ export default function TrajectorySimulator() {
                                     Hub
                                 </text>
                             </svg>
-                            ) : (
-                                <Trajectory3DView
-                                    samples={result.samples3d}
-                                    hubGeometry={result.hubGeometry}
-                                    interaction={result.hubInteraction}
-                                    ballRadius={radius}
-                                />
                             )}
 
                             {/* Info bar */}

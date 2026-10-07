@@ -6,38 +6,19 @@ const optimizers = {
   both: optimizeBoth,
 };
 
-const totalCandidates = {
-  angle: 160,
-  velocity: 100,
-  both: 980,
-};
-
 self.onmessage = (event) => {
   const {type, requestId, mode, params} = event.data ?? {};
   if (type !== 'optimize') return;
 
   const optimize = optimizers[mode];
   if (!optimize) {
-    self.postMessage({
-      type: 'error',
-      requestId,
-      message: `Unknown optimization mode: ${mode}`,
-    });
+    self.postMessage({type: 'error', requestId, message: `Unknown optimization mode: ${mode}`});
     return;
   }
 
   try {
     const result = optimize(params, {
-      onProgress: (progress) => {
-        self.postMessage({
-          type: 'progress',
-          requestId,
-          progress: {
-            ...progress,
-            totalCandidates: totalCandidates[mode],
-          },
-        });
-      },
+      onProgress: (progress) => self.postMessage({type: 'progress', requestId, progress}),
     });
     self.postMessage({type: 'complete', requestId, result});
   } catch (error) {

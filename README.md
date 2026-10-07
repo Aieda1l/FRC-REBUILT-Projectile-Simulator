@@ -26,7 +26,19 @@ The canonical engine uses a right-handed field coordinate system: **x** is forwa
 
 Air drag and Magnus lift use air-relative velocity v - wind. Only the component of spin perpendicular to that airflow contributes to Magnus lift. Launch state can also include robot field velocity, so a moving robot's velocity is added to the shooter-relative exit velocity before integration.
 
-The React simulator remains visually 2-D in this milestone: its existing downrange/height controls map to the x/z plane, and positive backspin maps to the negative-y spin axis. The browser keeps RK4 for fast local optimization sweeps while POST /api/simulate3d defaults to adaptive RK45.
+The React simulator keeps the familiar 2-D x/z graph as its default and now also provides an interactive SVG 3-D view. The 3-D view shows the trajectory, the actual modeled HUB funnel, ball-center clearance guides, a scrub-able FUEL marker, collision markers, and Isometric/Front/Side/Top camera presets. Positive UI backspin maps to the negative-y spin axis.
+
+The browser keeps RK4 for interactive rendering. Optimization runs in a cancellable module Web Worker using bounded coarse-to-fine searches; every returned solution is revalidated at `dt=0.001 s`, so the React main thread does not execute the search grid.
+
+### HUB Geometry and Shot Classification
+
+Browser scoring and visualization use one shared regular-hex funnel model derived from the official 2026 FIRST HUB drawings: 41.727 in top opening across flats at 72.0 in above carpet, 18.92 in panel bottom side, and 17.90 in panel vertical height. A FUEL is treated as a rigid 0.075 m-radius sphere for conservative clearance checks.
+
+A trajectory is classified as **clean entry**, **rim collision**, **funnel collision**, or **miss**. Only a clean entry is reported as a successful shot or accepted by the optimizer. A ball that contacts a modeled funnel panel is intentionally rejected even though a real compliant foam FUEL might deform or bounce into the HUB.
+
+### Responsive Optimization
+
+The three optimizer actions run in a Web Worker rather than the UI thread. Searches use a coarse pass followed by local refinement, expose progress and a **Cancel Optimization** control, and revalidate any winning candidate at the normal browser step size before applying it.
 
 ### Interactive Web GUI
 
@@ -132,7 +144,8 @@ The 2026 FUEL defaults are intentionally conservative rather than presented as m
 - $C_d=0.47$ is an **uncalibrated sphere-like baseline**; real foam-ball drag can vary with Reynolds number, wear, and surface condition.
 - $C_l=0.25$ is an **uncalibrated lift cap** for the simple spin-parameter model.
 - FUEL spin decay is **off by default** because no FUEL-specific spin-down data is available.
-- HUB hit detection uses an interpolated descending crossing and approximate ball-center clearance; full 3-D hex-edge/rim/funnel contact remains a future milestone.
+- HUB scoring uses official-dimension regular-hex funnel panels with rigid-sphere clearance and distinguishes clean entry, rim collision, funnel collision, and miss.
+- The rigid-sphere contact model is conservative: it does not model foam deformation, bounce/rebound, fasteners, light bars, or downstream internal HUB geometry.
 - Flywheel-to-exit-speed/backspin calculations remain rough launcher estimates and should be replaced by measured exit conditions when possible.
 
 Reference background: [NASA sphere drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/) and [FIRST 2026 season materials](https://www.firstinspires.org/resources/library/frc/season-materials).

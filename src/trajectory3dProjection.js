@@ -1,51 +1,35 @@
-export const CAMERA_PRESETS = Object.freeze({
-  isometric: Object.freeze({yaw: Math.PI / 4, pitch: Math.PI / 5}),
-  front: Object.freeze({yaw: 0, pitch: 0}),
-  side: Object.freeze({yaw: Math.PI / 2, pitch: 0}),
-  top: Object.freeze({yaw: 0, pitch: Math.PI / 2}),
-});
-
+const DEG = Math.PI / 180;
 const EPS = 1e-9;
-
-function rotatePoint([x, y, z], {yaw = 0, pitch = 0}) {
-  const cy = Math.cos(yaw);
-  const sy = Math.sin(yaw);
-  const cp = Math.cos(pitch);
-  const sp = Math.sin(pitch);
-  const yawX = cy * x - sy * y;
-  const yawY = sy * x + cy * y;
-  return {
-    horizontal: yawX,
-    vertical: cp * z - sp * yawY,
-    depth: sp * z + cp * yawY,
-  };
+export const CAMERA_PRESETS = Object.freeze({
+  isometric: Object.freeze({name: 'isometric', yaw: -45 * DEG, pitch: -35.264 * DEG}),
+  front: Object.freeze({name: 'front', yaw: 90 * DEG, pitch: 0}),
+  side: Object.freeze({name: 'side', yaw: 0, pitch: 0}),
+  top: Object.freeze({name: 'top', yaw: 0, pitch: -90 * DEG}),
+});
+function rotatePoint([x, y, z], camera) {
+  const cy = Math.cos(camera.yaw), sy = Math.sin(camera.yaw);
+  const cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
+  const x1 = cy * x - sy * y;
+  const y1 = sy * x + cy * y;
+  return {x: x1, y: -(sp * y1 + cp * z), depth: cp * y1 - sp * z};
 }
-
-export function projectScene(points, camera, {width = 640, height = 420, padding = 30} = {}) {
-  const rotated = points.map((point) => rotatePoint(point, camera));
-  if (!rotated.length) return {points: [], scale: 1};
-  const xs = rotated.map((point) => point.horizontal);
-  const ys = rotated.map((point) => point.vertical);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const extentX = Math.max(maxX - minX, EPS);
-  const extentY = Math.max(maxY - minY, EPS);
-  const usableWidth = Math.max(width - 2 * padding, 1);
-  const usableHeight = Math.max(height - 2 * padding, 1);
-  const scale = Math.min(usableWidth / extentX, usableHeight / extentY);
-  const contentWidth = extentX * scale;
-  const contentHeight = extentY * scale;
-  const offsetX = (width - contentWidth) / 2;
-  const offsetY = (height - contentHeight) / 2;
-
+export function projectScene(points, camera, {width = 600, height = 400, padding = 30} = {}) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return {points: [], scale: 1, bounds: {minX: 0, maxX: 0, minY: 0, maxY: 0}};
+  }
+  const raw = points.map((point) => rotatePoint(point, camera));
+  const xs = raw.map((p) => p.x), ys = raw.map((p) => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const extentX = Math.max(EPS, maxX - minX), extentY = Math.max(EPS, maxY - minY);
+  const scale = Math.min(
+    Math.max(EPS, width - 2 * padding) / extentX,
+    Math.max(EPS, height - 2 * padding) / extentY,
+  );
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
   return {
+    points: raw.map((p) => ({x: width / 2 + (p.x - cx) * scale, y: height / 2 + (p.y - cy) * scale, depth: p.depth})),
     scale,
-    points: rotated.map((point) => ({
-      x: offsetX + (point.horizontal - minX) * scale,
-      y: height - offsetY - (point.vertical - minY) * scale,
-      depth: point.depth,
-    })),
+    bounds: {minX, maxX, minY, maxY},
   };
 }
