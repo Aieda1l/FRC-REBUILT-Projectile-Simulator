@@ -5,6 +5,7 @@ const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
 
 // Backspin estimator for hooded flywheel shooters
+// This remains a rough launcher heuristic until shooter exit spin is measured.
 const estimateBackspin = (flywheelDia, flywheelRPM, ballDia, compression = 0.5, hoodMaterial = 'foam') => {
     const flywheelRadius = flywheelDia / 2;
     const ballRadius = ballDia / 2;
@@ -56,7 +57,8 @@ const simulateTrajectory = (params) => {
 
     const crossSection = Math.PI * radius * radius;
     const dragFactor = enableDrag ? 0.5 * airDensity * crossSection * dragCoeff : 0;
-    const magnusFactor = enableMagnus ? 0.5 * airDensity * crossSection * liftCoeff : 0;
+    // Dynamic-pressure/area term only; effectiveCl is applied exactly once below.
+    const magnusFactor = enableMagnus ? 0.5 * airDensity * crossSection : 0;
 
     const points = [{t, x, y, vx, vy, speed: velocity}];
     let maxHeight = y;
@@ -83,18 +85,18 @@ const simulateTrajectory = (params) => {
         if (speed > 0.001 && Math.abs(spin) > 0.001 && magnusFactor > 0) {
             const spinParam = Math.abs(spin) * radius / speed;
             const effectiveCl = liftCoeff * Math.min(spinParam, 0.5) * 2;
-            const magnusMag = magnusFactor * speed * speed * effectiveCl;
+            const magnusMag = magnusFactor * effectiveCl * speed * speed;
             const sign = Math.sign(spin);
             ax += (-sign * magnusMag * vy / speed) / mass;
             ay += (sign * magnusMag * vx / speed) / mass;
         }
 
-        // RK4-style integration (simplified)
+        // Small fixed-step integrator. Milestone 2 replaces this with true RK4/RK45.
         x += vx * dt + 0.5 * ax * dt * dt;
         y += vy * dt + 0.5 * ay * dt * dt;
         vx += ax * dt;
         vy += ay * dt;
-        spin *= Math.exp(-dt / 3.0); // Spin decay
+        // Keep spin constant until FUEL spin-down has been measured/calibrated.
         t += dt;
 
         maxHeight = Math.max(maxHeight, y);
@@ -306,7 +308,7 @@ export default function TrajectorySimulator() {
     // Backspin estimator parameters
     const [flywheelDia, setFlywheelDia] = useState(5.91);
     const [flywheelRPM, setFlywheelRPM] = useState(3500);
-    const [ballDia, setBallDia] = useState(5.0);
+    const [ballDia, setBallDia] = useState(5.91);
     const [compression, setCompression] = useState(0.5);
     const [showEstimator, setShowEstimator] = useState(false);
 
@@ -322,17 +324,20 @@ export default function TrajectorySimulator() {
 
     // Target
     const targetX = 0;
-    const targetY = 1.828;      // 72 inches (Front edge of opening)
-    const targetRadius = 0.302; // 11.9 inch radius (from Desmos 23.8" hole)
-    const funnelRadius = 0.529; // 20.85 inch radius (from Manual 41.7" funnel)
+    const targetY = 1.828;      // 72 inches (front edge of opening)
+    const funnelRadius = 0.529; // 20.85 inch apothem from the 41.7 in across-flats opening
+    // Approximate admissible FUEL-center half-width at the opening plane.
+    const targetRadius = 0.454; // 0.529 m opening apothem - 0.075 m FUEL radius
 
-    // Game piece (Fuel 2026)
-    const mass = 0.227;
+    // Game piece (FUEL 2026)
+    // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
+    const mass = 0.215;
     const diameter = 0.15;
     const radius = diameter / 2;
+    // Aerodynamic coefficients are uncalibrated FUEL baselines, not measured constants.
     const dragCoeff = 0.47;
     const liftCoeff = 0.25;
-    const airDensity = 1.225;
+    const airDensity = 1.204; // ~20 C, sea level; matches Python default environment
     const gravity = 9.81;
 
     // Sync with Python backend
