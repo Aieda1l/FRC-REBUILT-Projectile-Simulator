@@ -39,11 +39,16 @@ export function simulateShot(params, options = {}) {
     dragCoeff,
     liftCoeff,
     airDensity,
+    dynamicViscosity,
+    dragModel,
+    liftModel,
     gravity,
     enableDrag,
     enableMagnus,
     targetX = 0,
     targetLateralY = 0,
+    robotVelocity = [0, 0, 0],
+    wind = [0, 0, 0],
   } = params;
 
   const angle = angleDeg * DEG_TO_RAD;
@@ -52,6 +57,7 @@ export function simulateShot(params, options = {}) {
     [launchX, 0, launchY],
     [velocity * Math.cos(angle), 0, velocity * Math.sin(angle)],
     [0, -spin, 0],
+    robotVelocity,
   );
   const flightParams = {
     mass,
@@ -60,6 +66,10 @@ export function simulateShot(params, options = {}) {
     liftCoefficient: liftCoeff,
     airDensity,
     gravity,
+    wind,
+    dragModel,
+    liftModel,
+    ...(dynamicViscosity === undefined ? {} : {dynamicViscosity}),
     enableDrag,
     enableMagnus,
   };
