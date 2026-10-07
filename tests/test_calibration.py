@@ -8,6 +8,7 @@ from calibration.fitting import (
     parse_calibration_profile,
     split_shots,
     validate_profile,
+    _flight_parameters_for_shot,
 )
 from api.physics3d import FlightParameters, integrate_trajectory, launch_state
 
@@ -123,6 +124,22 @@ class CalibrationFittingTests(unittest.TestCase):
             "gravity": 9.81,
             "dynamic_viscosity": 1.81e-5,
         }
+
+
+    def test_flight_parameter_reconstruction_preserves_buoyancy_opt_out(self):
+        base = FlightParameters(enable_buoyancy=False)
+        shot = {
+            "position": [0, 0, 1],
+            "muzzleVelocity": [10, 0, 4],
+            "spin": [0, 0, 0],
+        }
+        rebuilt = _flight_parameters_for_shot(
+            shot,
+            base,
+            drag_model=base.drag_model,
+            lift_model=base.lift_model,
+        )
+        self.assertFalse(rebuilt.enable_buoyancy)
 
     def test_split_is_deterministic_for_seed(self):
         shots = [{"id": f"s{index}"} for index in range(12)]

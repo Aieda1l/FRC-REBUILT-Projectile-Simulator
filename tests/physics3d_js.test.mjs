@@ -374,6 +374,41 @@ test('aerodynamic diagnostics stay finite at zero relative airflow', () => {
 });
 
 
+
+test('simulateShot forwards explicit buoyancy opt-out', () => {
+  const params = baseParams({
+    launchX: 0,
+    launchY: 10,
+    velocity: 1,
+    angleDeg: 0,
+    airDensity: 1.204,
+    enableDrag: false,
+    enableMagnus: false,
+    enableBuoyancy: false,
+    targetX: 100,
+  });
+  const result = simulateShot(params, {dt: 0.01, maxTime: 0.1});
+  assert.ok(Math.abs(result.samples3d.at(-1).state[5] + 0.981) < 1e-10);
+});
+
+test('simulateShot leaves buoyancy enabled by default', () => {
+  const params = baseParams({
+    launchX: 0,
+    launchY: 10,
+    velocity: 1,
+    angleDeg: 0,
+    airDensity: 1.204,
+    enableDrag: false,
+    enableMagnus: false,
+    targetX: 100,
+  });
+  const result = simulateShot(params, {dt: 0.01, maxTime: 0.1});
+  const volume = (4 / 3) * Math.PI * params.radius ** 3;
+  const effectiveG = params.gravity
+    - params.airDensity * volume * params.gravity / params.mass;
+  assert.ok(Math.abs(result.samples3d.at(-1).state[5] + effectiveG * 0.1) < 1e-10);
+});
+
 test('simulateShot adds robot velocity once and forwards lateral motion', () => {
   const result = simulateShot(baseParams({
     launchX: 0,
