@@ -17,7 +17,7 @@ from api.physics3d import (
 
 class Physics3DTests(unittest.TestCase):
     def setUp(self):
-        self.vacuum = FlightParameters(enable_drag=False, enable_magnus=False)
+        self.vacuum = FlightParameters(enable_drag=False, enable_magnus=False, enable_buoyancy=False)
 
 
     def test_launch_state_has_canonical_order_and_float64(self):
@@ -43,7 +43,7 @@ class Physics3DTests(unittest.TestCase):
         np.testing.assert_allclose(dv[3:6], [0, 0, -9.81])
 
     def test_magnus_acceleration_is_perpendicular_to_airflow(self):
-        params = FlightParameters(enable_drag=False, wind=(1.0, -2.0, 0.5))
+        params = FlightParameters(enable_drag=False, enable_buoyancy=False, wind=(1.0, -2.0, 0.5))
         state = launch_state((0, 0, 2), (11, 3, 4), (20, -100, 30))
         dv = derivatives(state, params)
         u = state[3:6] - np.asarray(params.wind)
@@ -60,6 +60,113 @@ class Physics3DTests(unittest.TestCase):
         np.testing.assert_allclose(state[3:6], [11, 2, 5])
         np.testing.assert_allclose(state[6:], [0, -100, 0])
 
+
+
+    def test_buoyancy_reduces_effective_downward_acceleration(self):
+        params = FlightParameters(enable_drag=False, enable_magnus=False)
+        state = launch_state((0, 0, 2), (0, 0, 0), (0, 0, 0))
+        volume = (4.0 / 3.0) * math.pi * params.radius ** 3
+        expected = (
+            -params.gravity
+            + params.air_density * volume * params.gravity / params.mass
+        )
+        self.assertAlmostEqual(derivatives(state, params)[5], expected, places=12)
+        self.assertEqual(
+            derivatives(
+                state,
+                FlightParameters(
+                    enable_drag=False,
+                    enable_magnus=False,
+                    enable_buoyancy=False,
+                ),
+            )[5],
+            -params.gravity,
+        )
+        self.assertEqual(
+            derivatives(
+                state,
+                FlightParameters(
+                    enable_drag=False,
+                    enable_magnus=False,
+                    air_density=0,
+                ),
+            )[5],
+            -params.gravity,
+        )
+        self.assertEqual(
+            derivatives(
+                state,
+                FlightParameters(
+                    enable_drag=False,
+                    enable_magnus=False,
+                    gravity=0,
+                ),
+            )[5],
+            0,
+        )
+
+    def test_signed_lift_reverses_magnus_acceleration(self):
+        state = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
+        positive_params = FlightParameters(
+            enable_drag=False,
+            enable_buoyancy=False,
+            lift_model={
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [0.2, 0.2],
+            },
+        )
+        negative_params = FlightParameters(
+            enable_drag=False,
+            enable_buoyancy=False,
+            lift_model={
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.2, -0.2],
+            },
+        )
+        positive = derivatives(state, positive_params)[5] + positive_params.gravity
+        negative = derivatives(state, negative_params)[5] + negative_params.gravity
+        self.assertGreater(positive, 0)
+        self.assertLess(negative, 0)
+        self.assertAlmostEqual(positive, -negative, places=12)
+
+    def test_2d_drag_uses_current_spin_parameter(self):
+        drag_model = {
+            "kind": "table2d",
+            "reynolds": [50000, 200000],
+            "spinParameters": [0, 1],
+            "coefficients": [[0.2, 0.8], [0.2, 0.8]],
+        }
+        params = FlightParameters(
+            enable_magnus=False,
+            enable_buoyancy=False,
+            drag_model=drag_model,
+        )
+        unspun = derivatives(
+            launch_state((0, 0, 2), (10, 0, 0), (0, 0, 0)),
+            params,
+        )[3]
+        spun = derivatives(
+            launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0)),
+            params,
+        )[3]
+        self.assertLess(spun, unspun)
+
+    def test_zero_relative_airflow_has_no_drag_or_magnus_with_2d_drag(self):
+        params = FlightParameters(
+            wind=(10, 0, 0),
+            enable_buoyancy=False,
+            drag_model={
+                "kind": "table2d",
+                "reynolds": [50000, 200000],
+                "spinParameters": [0, 1],
+                "coefficients": [[0.2, 0.8], [0.2, 0.8]],
+            },
+        )
+        state = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
+        np.testing.assert_allclose(derivatives(state, params)[3:6], [0, 0, -9.81])
+        self.assertTrue(aerodynamic_diagnostics(state, params)["dragClamped"])
 
     def test_rk4_fourth_order_convergence(self):
         initial = launch_state((0, 0, 2), (12, 2, 8), (0, -120, 30))
@@ -143,23 +250,23 @@ class Physics3DTests(unittest.TestCase):
         np.testing.assert_allclose(adaptive[-1].state, reference[-1].state, atol=2e-4)
 
     def test_magnus_backspin_lifts_and_sidespin_deflects(self):
-        params = FlightParameters(enable_drag=False)
+        params = FlightParameters(enable_drag=False, enable_buoyancy=False)
         backspin = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
         sidespin = launch_state((0, 0, 2), (10, 0, 0), (0, 0, 100))
         self.assertGreater(derivatives(backspin, params)[5], -params.gravity)
         self.assertGreater(derivatives(sidespin, params)[4], 0)
 
     def test_only_spin_perpendicular_to_airflow_produces_lift(self):
-        params = FlightParameters(enable_drag=False)
+        params = FlightParameters(enable_drag=False, enable_buoyancy=False)
         axis_aligned = launch_state((0, 0, 2), (10, 0, 0), (100, 0, 0))
         self.assertAlmostEqual(derivatives(axis_aligned, params)[5], -params.gravity)
 
     def test_drag_uses_air_relative_velocity(self):
         initial = launch_state((0, 0, 2), (10, 0, 0), (0, 0, 0))
-        still_air = derivatives(initial, FlightParameters(enable_magnus=False))
+        still_air = derivatives(initial, FlightParameters(enable_magnus=False, enable_buoyancy=False))
         matching_wind = derivatives(
             initial,
-            FlightParameters(enable_magnus=False, wind=(10, 0, 0)),
+            FlightParameters(enable_magnus=False, enable_buoyancy=False, wind=(10, 0, 0)),
         )
         self.assertLess(still_air[3], 0)
         self.assertAlmostEqual(matching_wind[3], 0)
