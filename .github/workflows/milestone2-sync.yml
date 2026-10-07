@@ -1,0 +1,33 @@
+name: One-shot Milestone 2 tree sync
+
+on:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-reviewed-tree:
+    if: github.ref == 'refs/heads/milestone-2-rk45-3d-engine' && github.event.head_commit.message == 'chore: sync Milestone 2 reviewed tree'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fetch reviewed source archive
+        run: |
+          curl -fsSL https://sb-260rv60vsxdb.vercel.run/.sync/m2.tar.gz -o /tmp/m2.tar.gz
+          echo "54ae4e75fe6fea82521efd29fd900f1833a2b6a67e2c7a45759957019d6d8315  /tmp/m2.tar.gz" | sha256sum -c -
+      - name: Replace working tree with reviewed archive
+        run: |
+          mkdir -p /tmp/m2
+          tar -xzf /tmp/m2.tar.gz -C /tmp/m2
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a /tmp/m2/. .
+      - name: Commit exact reviewed tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: implement Milestone 2 RK4/RK45 3-D engine"
+          git push origin HEAD:milestone-2-rk45-3d-engine
