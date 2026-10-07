@@ -23,6 +23,7 @@ export const DEFAULT_FLIGHT_PARAMETERS = Object.freeze({
   wind: [0, 0, 0],
   enableDrag: true,
   enableMagnus: true,
+  enableBuoyancy: true,
   spinDecayTimeConstant: null,
 });
 
@@ -115,7 +116,7 @@ function aerodynamicState(y, p) {
   const relativeVelocity = velocity.map((value, i) => value - p.wind[i]);
   const speed = norm(relativeVelocity);
   if (speed <= EPS) {
-    const drag = evaluateDragModel(p.dragModel, 0);
+    const drag = evaluateDragModel(p.dragModel, 0, 0);
     const lift = evaluateLiftModel(p.liftModel, 0, 0);
     return {
       speed,
@@ -148,7 +149,7 @@ function aerodynamicState(y, p) {
     perpendicularSpin: omegaPerpMag,
     speed,
   });
-  const drag = evaluateDragModel(p.dragModel, reynolds);
+  const drag = evaluateDragModel(p.dragModel, reynolds, s);
   const lift = evaluateLiftModel(p.liftModel, reynolds, s);
   return {
     speed,
@@ -178,6 +179,10 @@ export function derivatives(state, params = {}) {
   const velocity = y.slice(3, 6);
   const omega = y.slice(6, 9);
   const acceleration = [0, 0, -p.gravity];
+  if (p.enableBuoyancy) {
+    const volume = (4 / 3) * Math.PI * p.radius ** 3;
+    acceleration[2] += p.airDensity * volume * p.gravity / p.mass;
+  }
   const aero = aerodynamicState(y, p);
 
   if (aero.speed > EPS) {
@@ -190,7 +195,7 @@ export function derivatives(state, params = {}) {
       }
     }
 
-    if (p.enableMagnus && aero.diagnostics.liftCoefficient > 0 && aero.omegaPerpMag > EPS) {
+    if (p.enableMagnus && aero.diagnostics.liftCoefficient !== 0 && aero.omegaPerpMag > EPS) {
       const lift = cross(aero.omegaPerp, aero.uHat);
       const liftNorm = norm(lift);
       if (liftNorm > EPS) {

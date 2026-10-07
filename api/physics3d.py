@@ -40,6 +40,7 @@ class FlightParameters:
     wind: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     enable_drag: bool = True
     enable_magnus: bool = True
+    enable_buoyancy: bool = True
     spin_decay_time_constant: Optional[float] = None
 
     def __post_init__(self) -> None:
@@ -99,7 +100,7 @@ def _aerodynamic_state(state: np.ndarray, params: FlightParameters) -> dict:
     relative_velocity = velocity - np.asarray(params.wind, dtype=np.float64)
     speed = float(np.linalg.norm(relative_velocity))
     if speed <= _EPS:
-        drag = evaluate_drag_model(params.drag_model, 0.0)
+        drag = evaluate_drag_model(params.drag_model, 0.0, 0.0)
         lift = evaluate_lift_model(params.lift_model, 0.0, 0.0)
         return {
             "speed": speed,
@@ -130,7 +131,7 @@ def _aerodynamic_state(state: np.ndarray, params: FlightParameters) -> dict:
         perpendicular_spin=omega_perp_mag,
         speed=speed,
     )
-    drag = evaluate_drag_model(params.drag_model, reynolds)
+    drag = evaluate_drag_model(params.drag_model, reynolds, spin_value)
     lift = evaluate_lift_model(params.lift_model, reynolds, spin_value)
     return {
         "speed": speed,
@@ -157,6 +158,11 @@ def derivatives(state: np.ndarray, params: FlightParameters) -> np.ndarray:
     velocity = y[3:6]
     omega = y[6:9]
     acceleration = np.array([0.0, 0.0, -params.gravity], dtype=np.float64)
+    if params.enable_buoyancy:
+        volume = (4.0 / 3.0) * np.pi * params.radius ** 3
+        acceleration[2] += (
+            params.air_density * volume * params.gravity / params.mass
+        )
     aero = _aerodynamic_state(y, params)
 
     if aero["speed"] > _EPS:
@@ -171,7 +177,7 @@ def derivatives(state: np.ndarray, params: FlightParameters) -> np.ndarray:
 
         if (
             params.enable_magnus
-            and diagnostics["liftCoefficient"] > 0
+            and diagnostics["liftCoefficient"] != 0
             and aero["omega_perp_mag"] > _EPS
         ):
             lift_direction = np.cross(aero["omega_perp"], aero["u_hat"])

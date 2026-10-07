@@ -39,7 +39,7 @@ class Physics3DTests(unittest.TestCase):
 
     def test_zero_relative_airflow_has_no_aerodynamic_acceleration(self):
         state = launch_state((0, 0, 1), (10, 0, 0), (0, -100, 0))
-        dv = derivatives(state, FlightParameters(wind=(10, 0, 0)))
+        dv = derivatives(state, FlightParameters(wind=(10, 0, 0), enable_buoyancy=False))
         np.testing.assert_allclose(dv[3:6], [0, 0, -9.81])
 
     def test_magnus_acceleration_is_perpendicular_to_airflow(self):
