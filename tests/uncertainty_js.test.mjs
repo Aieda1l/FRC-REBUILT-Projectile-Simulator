@@ -88,6 +88,27 @@ test('fixed zero uncertainty reproduces deterministic shot and probabilities sum
   assert.ok(Number.isFinite(robust.entryVelocity.median));
   assert.ok(Number.isFinite(robust.entryAngle.median));
 });
+test('generic scoring targets expose score probability without fixed classification keys', () => {
+  const params = cleanVacuumParams();
+  params.scoringTarget = {
+    kind: 'top-circle',
+    height: HUB_DIMENSIONS.topZ,
+    centerX: -0.30,
+    centerY: 0,
+    openingRadius: 0.5,
+    points: 2,
+  };
+  const robust = evaluateShotUncertainty(params, {
+    velocity: {kind: 'fixed', value: 0},
+    angleDeg: {kind: 'fixed', value: 0},
+    spinRPM: {kind: 'fixed', value: 0},
+  }, {sampleCount: 8, seed: 2026, dt: 0.002});
+  assert.equal(robust.scoreCount, 8);
+  assert.equal(robust.scoreProbability, 1);
+  assert.equal(robust.counts['clean-entry'], 8);
+  assert.equal(robust.counts['funnel-collision'], undefined);
+});
+
 test('uncertainty evaluator rejects pathological sample settings', () => {
   const params = cleanVacuumParams();
   assert.throws(() => evaluateShotUncertainty(params, {}, {sampleCount: 0}), RangeError);
