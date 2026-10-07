@@ -42,6 +42,31 @@ class AerodynamicsTests(unittest.TestCase):
         )
         self.assertEqual(evaluate_drag_model(model, 150000), {"coefficient": 0.4, "clamped": False})
         self.assertEqual(evaluate_drag_model(model, 50000), {"coefficient": 0.5, "clamped": True})
+        self.assertEqual(evaluate_drag_model(model, 150000, 0.75), {"coefficient": 0.4, "clamped": False})
+
+    def test_2d_drag_models_interpolate_over_reynolds_and_spin(self):
+        model = normalize_drag_model({
+            "kind": "table2d",
+            "reynolds": [100000, 200000],
+            "spinParameters": [0, 1],
+            "coefficients": [[0.5, 0.4], [0.3, 0.2]],
+        }, 0.47)
+        self.assertEqual(
+            evaluate_drag_model(model, 150000, 0.5),
+            {"coefficient": 0.35, "clamped": False},
+        )
+        self.assertEqual(
+            evaluate_drag_model(model, 50000, 0.5),
+            {"coefficient": 0.45, "clamped": True},
+        )
+        self.assertEqual(
+            evaluate_drag_model(model, 150000, 2),
+            {"coefficient": 0.3, "clamped": True},
+        )
+        self.assertEqual(
+            evaluate_drag_model(model, 150000),
+            {"coefficient": 0.4, "clamped": False},
+        )
 
     def test_legacy_1d_and_2d_lift_models_interpolate(self):
         legacy = normalize_lift_model({"kind": "legacy-spin-cap", "maxCoefficient": 0.25}, 0.1)
@@ -75,6 +100,14 @@ class AerodynamicsTests(unittest.TestCase):
             evaluate_lift_model(two_d, 150000, 0.5),
             {"coefficient": 0.25, "clamped": False},
         )
+        signed = normalize_lift_model(
+            {"kind": "table1d", "spinParameters": [0, 1], "coefficients": [-0.2, 0.2]},
+            0.25,
+        )
+        self.assertEqual(
+            evaluate_lift_model(signed, 120000, 0.25),
+            {"coefficient": -0.1, "clamped": False},
+        )
 
     def test_invalid_tables_are_rejected(self):
         with self.assertRaises(ValueError):
@@ -90,6 +123,18 @@ class AerodynamicsTests(unittest.TestCase):
                 "spinParameters": [0, 1],
                 "coefficients": [[0, 0.1]],
             }, 0.25)
+        with self.assertRaises(ValueError):
+            normalize_drag_model({
+                "kind": "table2d",
+                "reynolds": [100000, 200000],
+                "spinParameters": [0, 1],
+                "coefficients": [[0.5, -0.1], [0.3, 0.2]],
+            }, 0.47)
+        with self.assertRaises(ValueError):
+            normalize_lift_model(
+                {"kind": "legacy-spin-cap", "maxCoefficient": -0.1},
+                0.25,
+            )
 
 
 if __name__ == "__main__":

@@ -40,6 +40,24 @@ class CalibrationProfileTests(unittest.TestCase):
         self.assertEqual(profile["dragModel"]["kind"], "table1d")
         self.assertEqual(profile["liftModel"]["kind"], "table1d")
 
+    def test_profile_v1_accepts_2d_drag_and_signed_lift_tables(self):
+        profile = parse_calibration_profile({
+            **PROFILE,
+            "dragModel": {
+                "kind": "table2d",
+                "reynolds": [50000, 200000],
+                "spinParameters": [0, 1],
+                "coefficients": [[0.5, 0.45], [0.35, 0.3]],
+            },
+            "liftModel": {
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.1, 0.3],
+            },
+        })
+        self.assertEqual(profile["dragModel"]["kind"], "table2d")
+        self.assertEqual(profile["liftModel"]["coefficients"], [-0.1, 0.3])
+
     def test_unknown_schema_is_rejected(self):
         with self.assertRaises(ValueError):
             parse_calibration_profile({**PROFILE, "schema": "future-v2"})

@@ -45,6 +45,25 @@ test('calibration profile v1 parses and normalizes model data', () => {
   assert.deepEqual(profile.domain.reynolds, [50000, 200000]);
 });
 
+test('schema v1 accepts 2-D drag and signed lift tables', () => {
+  const profile = parseCalibrationProfile({
+    ...PROFILE,
+    dragModel: {
+      kind: 'table2d',
+      reynolds: [50000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0.5, 0.45], [0.35, 0.3]],
+    },
+    liftModel: {
+      kind: 'table1d',
+      spinParameters: [0, 1],
+      coefficients: [-0.1, 0.3],
+    },
+  });
+  assert.equal(profile.dragModel.kind, 'table2d');
+  assert.deepEqual(profile.liftModel.coefficients, [-0.1, 0.3]);
+});
+
 test('unknown schema and reversed domains are rejected', () => {
   assert.throws(() => parseCalibrationProfile({...PROFILE, schema: 'future-v2'}), RangeError);
   assert.throws(() => parseCalibrationProfile({
