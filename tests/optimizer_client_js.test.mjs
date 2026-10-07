@@ -72,3 +72,21 @@ test('dispose terminates active worker', () => {
   client.dispose();
   assert.equal(workers[0].terminated, true);
 });
+
+test('robust start forwards options without changing cancellation behavior', () => {
+  const workers = [];
+  const client = createOptimizerClient({workerFactory: factoryCollector(workers)});
+  const options = {
+    mode: 'angle',
+    uncertainty: {velocity: {kind: 'fixed', value: 0}},
+    coarseSamples: 4,
+    finalSamples: 8,
+    seed: 99,
+  };
+  const requestId = client.start('robust', {velocity: 10}, options);
+  assert.deepEqual(workers[0].posted[0], {
+    type: 'optimize', requestId, mode: 'robust', params: {velocity: 10}, options,
+  });
+  client.cancel();
+  assert.equal(workers[0].terminated, true);
+});

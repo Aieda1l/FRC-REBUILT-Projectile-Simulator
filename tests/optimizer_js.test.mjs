@@ -6,7 +6,9 @@ import {
   optimizeAngle,
   optimizeBoth,
   optimizeVelocity,
+  optimizeRobust,
   rankCandidate,
+  rankRobustCandidate,
 } from '../src/optimizer.js';
 
 const candidate = (classification, clearanceMargin, missDistance, velocity, angle) => ({
@@ -121,4 +123,49 @@ test('no-solution optimizer reports near miss without promoting it to success', 
   assert.equal(result.solution, null);
   assert.ok(result.bestNearMiss);
   assert.notEqual(result.bestNearMiss.result.hubInteraction.classification, 'clean-entry');
+});
+
+const robustCandidate = (probability, p10, velocity, angle, clearance = 0.02) => ({
+  velocity,
+  angle,
+  result: {hubInteraction: {classification: 'clean-entry', clearanceMargin: clearance, missDistance: 0}},
+  robust: {probabilities: {'clean-entry': probability}, clearance: {p10}},
+});
+
+test('robust ranking prefers clean-entry probability then low-percentile clearance', () => {
+  const reference = {velocity: 10, angle: 50};
+  const likely = robustCandidate(0.9, 0.001, 10, 50);
+  const roomy = robustCandidate(0.8, 0.05, 10, 50);
+  assert.ok(rankRobustCandidate(likely, roomy, reference) < 0);
+
+  const safer = robustCandidate(0.9, 0.02, 10, 50);
+  assert.ok(rankRobustCandidate(safer, likely, reference) < 0);
+});
+
+test('robust ranking falls back to deterministic reference-distance tie break', () => {
+  const reference = {velocity: 10, angle: 50};
+  const close = robustCandidate(0.9, 0.02, 10.1, 50.1);
+  const far = robustCandidate(0.9, 0.02, 14, 60);
+  assert.ok(rankRobustCandidate(close, far, reference) < 0);
+});
+
+test('robust optimizer revalidates winner at fine dt and full sample count', () => {
+  const result = optimizeRobust(makeVacuumCleanParams(), {
+    mode: 'angle',
+    uncertainty: {
+      velocity: {kind: 'fixed', value: 0},
+      angleDeg: {kind: 'fixed', value: 0},
+    },
+    coarseSamples: 4,
+    finalSamples: 8,
+    seed: 99,
+  });
+  assert.ok(result.solution);
+  assert.equal(result.solution.robust.sampleCount, 8);
+  assert.equal(result.solution.robust.probabilities['clean-entry'], 1);
+  const times = result.solution.result.samples3d.map((sample) => sample.time);
+  for (let i = 1; i < times.length; i += 1) {
+    assert.ok(times[i] - times[i - 1] <= 0.001 + 1e-12);
+  }
+  assert.ok(result.monteCarloEvaluations <= 12);
 });
