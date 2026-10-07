@@ -49,6 +49,38 @@ test('exact ties prefer parameters closest to the reference', () => {
   assert.ok(rankCandidate(a, b, {velocity: 10, angle: 50}) < 0);
 });
 
+test('candidate ranking honors generic scoring interaction state', () => {
+  const scored = {
+    velocity: 10,
+    angle: 50,
+    result: {
+      scoringInteraction: {
+        classification: 'speaker-score',
+        status: 'scored',
+        isScore: true,
+        scoreRank: 3,
+        clearanceMargin: 0.01,
+        missDistance: 0,
+      },
+    },
+  };
+  const miss = {
+    velocity: 10,
+    angle: 50,
+    result: {
+      scoringInteraction: {
+        classification: 'outside-speaker',
+        status: 'miss',
+        isScore: false,
+        scoreRank: 1,
+        clearanceMargin: -0.2,
+        missDistance: 0.01,
+      },
+    },
+  };
+  assert.ok(rankCandidate(scored, miss, {velocity: 10, angle: 50}) < 0);
+});
+
 function baseParams(overrides = {}) {
   return {
     launchX: -3,
@@ -147,6 +179,19 @@ test('robust ranking falls back to deterministic reference-distance tie break', 
   const close = robustCandidate(0.9, 0.02, 10.1, 50.1);
   const far = robustCandidate(0.9, 0.02, 14, 60);
   assert.ok(rankRobustCandidate(close, far, reference) < 0);
+});
+
+test('robust ranking accepts generic scoreProbability', () => {
+  const reference = {velocity: 10, angle: 50};
+  const likely = {
+    ...candidate('miss', -0.2, 0.01, 10, 50),
+    robust: {scoreProbability: 0.9, clearance: {p10: 0.01}},
+  };
+  const unlikely = {
+    ...candidate('clean-entry', 0.05, 0, 10, 50),
+    robust: {scoreProbability: 0.8, clearance: {p10: 0.05}},
+  };
+  assert.ok(rankRobustCandidate(likely, unlikely, reference) < 0);
 });
 
 test('robust optimizer revalidates winner at fine dt and full sample count', () => {
