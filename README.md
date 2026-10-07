@@ -37,6 +37,14 @@ Browser scoring and visualization use one shared regular-hex funnel model derive
 
 A trajectory is classified as **clean entry**, **rim collision**, **funnel collision**, or **miss**. Only a clean entry is reported as a successful shot or accepted by the optimizer. A ball that contacts a modeled funnel panel is intentionally rejected even though a real compliant foam FUEL might deform or bounce into the HUB.
 
+### Extensible Game Pieces and Scoring
+
+The browser simulation core now separates projectile physics from game rules. Versioned game profiles can provide a reusable game-piece definition plus a scoring target. Built-in scorers cover the detailed 2026 hex HUB, horizontal circular openings, and arbitrary rectangular/circular plane apertures; additional scoring methods can be registered without changing the trajectory integrator.
+
+The optimizer and Monte Carlo evaluator consume normalized score state (`isScore`, `status`, `scoreRank`, clearance, and miss distance), so future games do not need to reuse 2026 classification names. Point values can vary by phase or scoring variant independently from physical entry geometry.
+
+See [Extensible Game Pieces and Scoring](docs/game-profiles.md) for the JSON schema, examples, extension API, and design notes drawn from past FRC shooting games.
+
 ### Responsive and Robust Optimization
 
 The three deterministic optimizer actions run in a Web Worker rather than the UI thread. Searches use a coarse pass followed by local refinement, expose progress and a **Cancel Optimization** control, and revalidate any winning candidate at the normal browser step size before applying it.
