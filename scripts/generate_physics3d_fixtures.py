@@ -28,6 +28,9 @@ CASE_NAMES = [
     "rk45",
     "calibrated_drag_wind_robot",
     "calibrated_lift_wind_robot",
+    "buoyancy",
+    "signed_lift",
+    "calibrated_drag_spin",
 ]
 
 
@@ -39,7 +42,7 @@ def build_fixture():
     cases = []
 
     vacuum_initial = launch_state((0, 0, 2), (10, 3, 5), (0, 0, 0))
-    vacuum_params = FlightParameters(enable_drag=False, enable_magnus=False)
+    vacuum_params = FlightParameters(enable_drag=False, enable_magnus=False, enable_buoyancy=False)
     vacuum_samples = integrate_trajectory(
         vacuum_initial,
         vacuum_params,
@@ -52,7 +55,7 @@ def build_fixture():
         "name": "vacuum",
         "operation": "trajectory",
         "initialState": _list(vacuum_initial),
-        "params": {"enableDrag": False, "enableMagnus": False},
+        "params": {"enableDrag": False, "enableMagnus": False, "enableBuoyancy": False},
         "options": {"method": "rk4", "dt": 0.05, "maxTime": 0.2, "terminalHeight": None},
         "expectedSamples": [
             {"time": float(sample.time), "state": _list(sample.state)}
@@ -65,8 +68,8 @@ def build_fixture():
         "name": "drag_only",
         "operation": "derivatives",
         "state": _list(state),
-        "params": {"enableMagnus": False},
-        "expected": _list(derivatives(state, FlightParameters(enable_magnus=False))),
+        "params": {"enableMagnus": False, "enableBuoyancy": False},
+        "expected": _list(derivatives(state, FlightParameters(enable_magnus=False, enable_buoyancy=False))),
     })
 
     state = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
@@ -74,8 +77,8 @@ def build_fixture():
         "name": "backspin",
         "operation": "derivatives",
         "state": _list(state),
-        "params": {"enableDrag": False},
-        "expected": _list(derivatives(state, FlightParameters(enable_drag=False))),
+        "params": {"enableDrag": False, "enableBuoyancy": False},
+        "expected": _list(derivatives(state, FlightParameters(enable_drag=False, enable_buoyancy=False))),
     })
 
     state = launch_state((0, 0, 2), (10, 0, 0), (0, 0, 100))
@@ -83,7 +86,7 @@ def build_fixture():
         "name": "sidespin",
         "operation": "derivatives",
         "state": _list(state),
-        "params": {"enableDrag": False},
+        "params": {"enableDrag": False, "enableBuoyancy": False},
         "expected": _list(derivatives(state, FlightParameters(enable_drag=False))),
     })
 
@@ -92,8 +95,8 @@ def build_fixture():
         "name": "matching_wind",
         "operation": "derivatives",
         "state": _list(state),
-        "params": {"wind": [10.0, 0.0, 0.0]},
-        "expected": _list(derivatives(state, FlightParameters(wind=(10, 0, 0)))),
+        "params": {"wind": [10.0, 0.0, 0.0], "enableBuoyancy": False},
+        "expected": _list(derivatives(state, FlightParameters(wind=(10, 0, 0), enable_buoyancy=False))),
     })
 
     launched = launch_state((1, 2, 3), (10, 0, 5), (0, -100, 20), (1, 2, 0))
@@ -112,6 +115,7 @@ def build_fixture():
         enable_drag=False,
         enable_magnus=False,
         spin_decay_time_constant=2.0,
+        enable_buoyancy=False,
     )
     cases.append({
         "name": "spin_decay",
@@ -121,13 +125,14 @@ def build_fixture():
             "enableDrag": False,
             "enableMagnus": False,
             "spinDecayTimeConstant": 2.0,
+            "enableBuoyancy": False,
         },
         "dt": 0.1,
         "expected": _list(rk4_step(state, spin_params, 0.1)),
     })
 
     initial = launch_state((0, 0, 2), (12, 3, 8), (0, -100, 20))
-    rk45_params = FlightParameters(wind=(1, -0.5, 0))
+    rk45_params = FlightParameters(wind=(1, -0.5, 0), enable_buoyancy=False)
     rk45_samples = integrate_trajectory(
         initial,
         rk45_params,
@@ -143,7 +148,7 @@ def build_fixture():
         "name": "rk45",
         "operation": "trajectoryFinal",
         "initialState": _list(initial),
-        "params": {"wind": [1.0, -0.5, 0.0]},
+        "params": {"wind": [1.0, -0.5, 0.0], "enableBuoyancy": False},
         "options": {
             "method": "rk45",
             "dt": 0.2,
@@ -172,6 +177,7 @@ def build_fixture():
         wind=(1.0, -0.5, 0.0),
         drag_model=calibrated_drag_model,
         enable_magnus=False,
+        enable_buoyancy=False,
     )
     calibrated_drag_samples = integrate_trajectory(
         calibrated_drag_initial,
@@ -190,6 +196,7 @@ def build_fixture():
             "wind": [1.0, -0.5, 0.0],
             "dragModel": calibrated_drag_model,
             "enableMagnus": False,
+            "enableBuoyancy": False,
         },
         "options": {
             "method": "rk4",
@@ -220,6 +227,7 @@ def build_fixture():
         wind=(0.5, 0.2, 0.0),
         drag_model={"kind": "constant", "coefficient": 0.4},
         lift_model=calibrated_lift_model,
+        enable_buoyancy=False,
     )
     calibrated_lift_samples = integrate_trajectory(
         calibrated_lift_initial,
@@ -238,6 +246,7 @@ def build_fixture():
             "wind": [0.5, 0.2, 0.0],
             "dragModel": {"kind": "constant", "coefficient": 0.4},
             "liftModel": calibrated_lift_model,
+            "enableBuoyancy": False,
         },
         "options": {
             "method": "rk4",
@@ -246,6 +255,72 @@ def build_fixture():
             "terminalHeight": None,
         },
         "expectedFinal": _list(calibrated_lift_samples[-1].state),
+    })
+
+
+    buoyancy_state = launch_state((0, 0, 2), (0, 0, 0), (0, 0, 0))
+    buoyancy_params = FlightParameters(
+        enable_drag=False,
+        enable_magnus=False,
+        enable_buoyancy=True,
+    )
+    cases.append({
+        "name": "buoyancy",
+        "operation": "derivatives",
+        "state": _list(buoyancy_state),
+        "params": {
+            "enableDrag": False,
+            "enableMagnus": False,
+            "enableBuoyancy": True,
+        },
+        "expected": _list(derivatives(buoyancy_state, buoyancy_params)),
+    })
+
+    signed_lift_model = {
+        "kind": "table1d",
+        "spinParameters": [0.0, 1.0],
+        "coefficients": [-0.2, -0.2],
+    }
+    signed_lift_state = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
+    signed_lift_params = FlightParameters(
+        enable_drag=False,
+        enable_buoyancy=False,
+        lift_model=signed_lift_model,
+    )
+    cases.append({
+        "name": "signed_lift",
+        "operation": "derivatives",
+        "state": _list(signed_lift_state),
+        "params": {
+            "enableDrag": False,
+            "enableBuoyancy": False,
+            "liftModel": signed_lift_model,
+        },
+        "expected": _list(derivatives(signed_lift_state, signed_lift_params)),
+    })
+
+    drag_spin_model = {
+        "kind": "table2d",
+        "reynolds": [50000.0, 200000.0],
+        "spinParameters": [0.0, 1.0],
+        "coefficients": [[0.2, 0.8], [0.2, 0.8]],
+    }
+    drag_spin_state = launch_state((0, 0, 2), (10, 0, 0), (0, -100, 0))
+    drag_spin_params = FlightParameters(
+        enable_magnus=False,
+        enable_buoyancy=False,
+        drag_model=drag_spin_model,
+    )
+    cases.append({
+        "name": "calibrated_drag_spin",
+        "operation": "derivatives",
+        "state": _list(drag_spin_state),
+        "params": {
+            "enableMagnus": False,
+            "enableBuoyancy": False,
+            "dragModel": drag_spin_model,
+        },
+        "expected": _list(derivatives(drag_spin_state, drag_spin_params)),
     })
 
     assert [case["name"] for case in cases] == CASE_NAMES

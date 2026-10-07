@@ -1,7 +1,7 @@
 # FRC 2026 Projectile Trajectory Simulator
 
 A web-based physics simulator for FIRST Robotics Competition (FRC) teams to calculate and optimize shooting
-trajectories. It models gravity, quadratic air drag, backspin/Magnus lift, and interactive error analysis while keeping
+trajectories. It models gravity, buoyancy, quadratic air drag, backspin/Magnus lift, and interactive error analysis while keeping
 uncalibrated FUEL-specific aerodynamic assumptions explicit while supporting measured calibration profiles and robust Monte Carlo optimization.
 
 ![React](https://img.shields.io/badge/React-18.0+-61DAFB.svg?logo=react&logoColor=white)
@@ -14,8 +14,9 @@ uncalibrated FUEL-specific aerodynamic assumptions explicit while supporting mea
 ### Physics Modeling
 
 - **Gravitational acceleration**: Standard configurable 9.81 m/s²; altitude and temperature adjust air density, not gravity.
-- **Quadratic air drag**: Standard $\frac{1}{2}\rho A C_d v^2$ force law with either a scalar baseline or calibrated $C_d(Re)$ tables.
-- **Magnus effect**: Arbitrary 3-D spin vectors using the dimensionless spin parameter $S=\omega_\perp r/v$, with legacy or calibrated $C_l(S,Re)$ models.
+- **Buoyancy**: Atmospheric buoyancy is enabled by default from ball volume, air density, and gravity; it can be disabled for analytic/vacuum comparisons.
+- **Quadratic air drag**: Standard $\frac{1}{2}\rho A C_d v^2$ force law with a scalar baseline, calibrated $C_d(Re)$ tables, or supplied $C_d(Re,S)$ tables.
+- **Magnus effect**: Arbitrary 3-D spin vectors using the dimensionless spin parameter $S=\omega_\perp r/v$, with legacy or calibrated $C_l(S,Re)$ models. Calibrated tables may be signed; the legacy baseline remains nonnegative.
 - **Spin decay**: Disabled by default for FUEL until a measured decay time constant is available; an optional calibrated time constant is integrated as part of the ODE.
 - **Environment**: Air-density correction for temperature/altitude in the legacy Python adapter plus field-axis wind vectors in the canonical 3-D core.
 - **Numerical solvers**: True whole-state RK4 and adaptive Dormand-Prince RK45. The browser uses fixed-step RK4 by default; the new 3-D API defaults to RK45.
@@ -129,10 +130,19 @@ handle the Python/React hybrid build.
 
 ## Physics Model Details
 
+### Buoyancy
+
+The canonical flight engines include Archimedean buoyancy by default:
+$a_{buoyancy} = \frac{\rho_{air}(4\pi r^3/3)g}{m}$
+
+For the nominal FUEL geometry and mass this is roughly a one-percent reduction in effective downward acceleration. This force is derived from existing physical inputs; it is not a fitted FUEL-specific coefficient.
+
 ### Air Drag
 
 The simulator uses the standard quadratic drag model:
-$$F_{drag} = -\frac{1}{2} \rho A C_d v^2 \hat{v}$$
+$F_{drag} = -\frac{1}{2} \rho A C_d v^2 \hat{v}$
+
+Drag models can be constant, tabulated versus Reynolds number, or supplied as a two-dimensional $C_d(Re,S)$ table. The project does **not** bundle a measured FUEL $C_d(Re,S)$ surface and does not automatically fit one from trajectory data.
 
 ### Magnus Effect
 
@@ -147,7 +157,7 @@ The 2026 FUEL defaults are intentionally conservative rather than presented as m
 
 - Nominal mass is **0.215 kg**, the midpoint of the official ~0.203-0.227 kg range.
 - $C_d=0.47$ is an **uncalibrated sphere-like baseline**; real foam-ball drag can vary with Reynolds number, wear, and surface condition.
-- $C_l=0.25$ is an **uncalibrated lift cap** for the simple spin-parameter model.
+- $C_l=0.25$ is an **uncalibrated, nonnegative lift cap** for the simple spin-parameter model. Measured tabulated lift profiles may contain signed coefficients.
 - FUEL spin decay is **off by default** because no FUEL-specific spin-down data is available.
 - HUB scoring uses official-dimension regular-hex funnel panels with rigid-sphere clearance and distinguishes clean entry, rim collision, funnel collision, and miss.
 - The rigid-sphere contact model is conservative: it does not model foam deformation, bounce/rebound, fasteners, light bars, or downstream internal HUB geometry.
@@ -155,11 +165,11 @@ The 2026 FUEL defaults are intentionally conservative rather than presented as m
 
 Reference background: [NASA sphere drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/) and [FIRST 2026 season materials](https://www.firstinspires.org/resources/library/frc/season-materials).
 
-For measured operation, the simulator accepts versioned JSON calibration profiles containing a constant or tabulated drag model, a spin/Reynolds-dependent lift model, an optional measured spin-decay time constant, calibrated Reynolds/spin domains, and validation metrics. Out-of-domain table queries clamp to the calibrated boundary and are surfaced as diagnostics rather than silently extrapolated.
+For measured operation, the simulator accepts versioned JSON calibration profiles containing a constant, $C_d(Re)$, or supplied $C_d(Re,S)$ drag model, a spin/Reynolds-dependent lift model, an optional measured spin-decay time constant, calibrated Reynolds/spin domains, and validation metrics. Out-of-domain table queries clamp to the calibrated boundary and are surfaced as diagnostics rather than silently extrapolated.
 
 The browser's **Advanced Physics** panel exposes calibration profile loading, robot forward/lateral velocity, wind, uncertainty controls, and robust optimization. Measured exit speed/spin are treated as the authoritative launch inputs; the flywheel calculator remains a heuristic and requires an explicit **Apply Estimate** action.
 
-See [FUEL Calibration and Validation Guide](docs/calibration-guide.md) for high-speed-video measurement, dataset format, fitting, held-out validation, and uncertainty setup. No measured FUEL aerodynamic coefficient set is bundled with the project.
+See [FUEL Calibration and Validation Guide](docs/calibration-guide.md) for high-speed-video measurement, dataset format, fitting, held-out validation, and uncertainty setup. No measured FUEL aerodynamic coefficient set is bundled with the project. Profiles fitted with an older engine that omitted buoyancy should be revalidated before being treated as current.
 
 ## Python API Usage
 

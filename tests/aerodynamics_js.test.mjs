@@ -38,6 +38,23 @@ test('constant and 1-D drag models evaluate and clamp', () => {
   );
   assert.deepEqual(evaluateDragModel(model, 150000), {coefficient: 0.4, clamped: false});
   assert.deepEqual(evaluateDragModel(model, 50000), {coefficient: 0.5, clamped: true});
+  assert.deepEqual(evaluateDragModel(model, 150000, 0.75), {coefficient: 0.4, clamped: false});
+});
+
+test('2-D drag models interpolate over Reynolds number and spin', () => {
+  const model = normalizeDragModel({
+    kind: 'table2d',
+    reynolds: [100000, 200000],
+    spinParameters: [0, 1],
+    coefficients: [[0.5, 0.4], [0.3, 0.2]],
+  }, 0.47);
+
+  assert.deepEqual(evaluateDragModel(model, 150000, 0.5), {coefficient: 0.35, clamped: false});
+  assert.deepEqual(evaluateDragModel(model, 50000, 0.5), {coefficient: 0.45, clamped: true});
+  const highSpin = evaluateDragModel(model, 150000, 2);
+  assert.equal(highSpin.clamped, true);
+  assert.ok(Math.abs(highSpin.coefficient - 0.3) < 1e-12);
+  assert.deepEqual(evaluateDragModel(model, 150000), {coefficient: 0.4, clamped: false});
 });
 
 test('legacy, 1-D, and 2-D lift models interpolate correctly', () => {
@@ -59,6 +76,12 @@ test('legacy, 1-D, and 2-D lift models interpolate correctly', () => {
     coefficients: [[0, 0.2], [0.2, 0.6]],
   }, 0.25);
   assert.deepEqual(evaluateLiftModel(twoD, 150000, 0.5), {coefficient: 0.25, clamped: false});
+
+  const signed = normalizeLiftModel(
+    {kind: 'table1d', spinParameters: [0, 1], coefficients: [-0.2, 0.2]},
+    0.25,
+  );
+  assert.deepEqual(evaluateLiftModel(signed, 120000, 0.25), {coefficient: -0.1, clamped: false});
 });
 
 test('invalid tables are rejected', () => {
@@ -72,6 +95,13 @@ test('invalid tables are rejected', () => {
       spinParameters: [0, 1],
       coefficients: [[0, 0.1]],
     }, 0.25),
+    () => normalizeDragModel({
+      kind: 'table2d',
+      reynolds: [100000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0.5, -0.1], [0.3, 0.2]],
+    }, 0.47),
+    () => normalizeLiftModel({kind: 'legacy-spin-cap', maxCoefficient: -0.1}, 0.25),
   ];
   for (const fn of bad) assert.throws(fn, RangeError);
 });

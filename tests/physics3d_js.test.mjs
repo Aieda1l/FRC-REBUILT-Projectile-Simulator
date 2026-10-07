@@ -32,7 +32,7 @@ test('launch adds robot field velocity', () => {
 test('gravity-only RK4 matches analytic solution', () => {
   const out = integrateTrajectory(
     launchState([0, 0, 2], [10, 3, 5], [0, 0, 0]),
-    {enableDrag: false, enableMagnus: false},
+    {enableDrag: false, enableMagnus: false, enableBuoyancy: false},
     {method: 'rk4', dt: 0.01, maxTime: 0.4, terminalHeight: null},
   );
   assertArrayClose(
@@ -46,13 +46,13 @@ test('backspin lifts and sidespin deflects', () => {
   assert.ok(
     derivatives(
       launchState([0, 0, 2], [10, 0, 0], [0, -100, 0]),
-      {enableDrag: false},
+      {enableDrag: false, enableBuoyancy: false},
     )[5] > -9.81,
   );
   assert.ok(
     derivatives(
       launchState([0, 0, 2], [10, 0, 0], [0, 0, 100]),
-      {enableDrag: false},
+      {enableDrag: false, enableBuoyancy: false},
     )[4] > 0,
   );
 });
@@ -61,7 +61,7 @@ test('parallel spin gives zero Magnus lift', () => {
   assert.ok(Math.abs(
     derivatives(
       launchState([0, 0, 2], [10, 0, 0], [100, 0, 0]),
-      {enableDrag: false},
+      {enableDrag: false, enableBuoyancy: false},
     )[5] + 9.81,
   ) < 1e-12);
 });
@@ -70,10 +70,85 @@ test('matching wind removes aerodynamic force', () => {
   assertArrayClose(
     derivatives(
       launchState([0, 0, 2], [10, 0, 0], [0, 0, 0]),
-      {wind: [10, 0, 0]},
+      {wind: [10, 0, 0], enableBuoyancy: false},
     ).slice(3, 6),
     [0, 0, -9.81],
   );
+});
+
+
+test('buoyancy reduces effective downward acceleration', () => {
+  const params = {
+    mass: 0.215,
+    radius: 0.075,
+    airDensity: 1.204,
+    gravity: 9.81,
+    enableDrag: false,
+    enableMagnus: false,
+  };
+  const state = launchState([0, 0, 2], [0, 0, 0], [0, 0, 0]);
+  const volume = (4 / 3) * Math.PI * params.radius ** 3;
+  const expected = -params.gravity
+    + params.airDensity * volume * params.gravity / params.mass;
+  assert.ok(Math.abs(derivatives(state, params)[5] - expected) < 1e-12);
+  assert.equal(derivatives(state, {...params, enableBuoyancy: false})[5], -params.gravity);
+  assert.equal(derivatives(state, {...params, airDensity: 0})[5], -params.gravity);
+  assert.equal(derivatives(state, {...params, gravity: 0})[5], 0);
+});
+
+test('signed lift reverses Magnus acceleration', () => {
+  const state = launchState([0, 0, 2], [10, 0, 0], [0, -100, 0]);
+  const common = {
+    enableDrag: false,
+    enableBuoyancy: false,
+    liftModel: {kind: 'table1d', spinParameters: [0, 1], coefficients: [0.2, 0.2]},
+  };
+  const positive = derivatives(state, common)[5] + 9.81;
+  const negative = derivatives(state, {
+    ...common,
+    liftModel: {kind: 'table1d', spinParameters: [0, 1], coefficients: [-0.2, -0.2]},
+  })[5] + 9.81;
+  assert.ok(positive > 0);
+  assert.ok(negative < 0);
+  assert.ok(Math.abs(positive + negative) < 1e-12);
+});
+
+test('2-D drag uses current spin parameter', () => {
+  const common = {
+    enableMagnus: false,
+    enableBuoyancy: false,
+    dragModel: {
+      kind: 'table2d',
+      reynolds: [50000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0.2, 0.8], [0.2, 0.8]],
+    },
+  };
+  const unspun = derivatives(
+    launchState([0, 0, 2], [10, 0, 0], [0, 0, 0]),
+    common,
+  )[3];
+  const spun = derivatives(
+    launchState([0, 0, 2], [10, 0, 0], [0, -100, 0]),
+    common,
+  )[3];
+  assert.ok(spun < unspun);
+});
+
+test('zero relative airflow has no drag or Magnus with 2-D drag model', () => {
+  const params = {
+    wind: [10, 0, 0],
+    enableBuoyancy: false,
+    dragModel: {
+      kind: 'table2d',
+      reynolds: [50000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0.2, 0.8], [0.2, 0.8]],
+    },
+  };
+  const state = launchState([0, 0, 2], [10, 0, 0], [0, -100, 0]);
+  assertArrayClose(derivatives(state, params).slice(3, 6), [0, 0, -9.81]);
+  assert.equal(aerodynamicDiagnostics(state, params).dragClamped, true);
 });
 
 test('RK45 reaches maxTime exactly', () => {
@@ -182,6 +257,7 @@ function vacuumShotThroughTopAt(xCross) {
     angleDeg: Math.atan2(vz, vx) * 180 / Math.PI,
     enableDrag: false,
     enableMagnus: false,
+    airDensity: 0,
     targetX: 0,
   });
 }
@@ -297,6 +373,41 @@ test('aerodynamic diagnostics stay finite at zero relative airflow', () => {
   });
 });
 
+
+
+test('simulateShot forwards explicit buoyancy opt-out', () => {
+  const params = baseParams({
+    launchX: 0,
+    launchY: 10,
+    velocity: 1,
+    angleDeg: 0,
+    airDensity: 1.204,
+    enableDrag: false,
+    enableMagnus: false,
+    enableBuoyancy: false,
+    targetX: 100,
+  });
+  const result = simulateShot(params, {dt: 0.01, maxTime: 0.1});
+  assert.ok(Math.abs(result.samples3d.at(-1).state[5] + 0.981) < 1e-10);
+});
+
+test('simulateShot leaves buoyancy enabled by default', () => {
+  const params = baseParams({
+    launchX: 0,
+    launchY: 10,
+    velocity: 1,
+    angleDeg: 0,
+    airDensity: 1.204,
+    enableDrag: false,
+    enableMagnus: false,
+    targetX: 100,
+  });
+  const result = simulateShot(params, {dt: 0.01, maxTime: 0.1});
+  const volume = (4 / 3) * Math.PI * params.radius ** 3;
+  const effectiveG = params.gravity
+    - params.airDensity * volume * params.gravity / params.mass;
+  assert.ok(Math.abs(result.samples3d.at(-1).state[5] + effectiveG * 0.1) < 1e-10);
+});
 
 test('simulateShot adds robot velocity once and forwards lateral motion', () => {
   const result = simulateShot(baseParams({

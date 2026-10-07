@@ -49,6 +49,31 @@ test('sampleShotParams applies additive perturbations and aerodynamic multiplier
   assert.deepEqual(sampled.robotVelocity, [0.2, -0.1, 0]);
   assert.deepEqual(sampled.wind, [0.5, 0, 0]);
 });
+
+test('uncertainty scaling supports 2-D drag and preserves signed lift and buoyancy toggle', () => {
+  const sampled = sampleShotParams(baseParams({
+    enableBuoyancy: false,
+    dragModel: {
+      kind: 'table2d',
+      reynolds: [50000, 200000],
+      spinParameters: [0, 1],
+      coefficients: [[0.2, 0.4], [0.3, 0.5]],
+    },
+    liftModel: {
+      kind: 'table1d',
+      spinParameters: [0, 1],
+      coefficients: [-0.2, 0.1],
+    },
+  }), {
+    dragMultiplier: {kind: 'fixed', value: 2},
+    liftMultiplier: {kind: 'fixed', value: 0.5},
+  }, createSeededRng(9));
+
+  assert.deepEqual(sampled.dragModel.coefficients, [[0.4, 0.8], [0.6, 1.0]]);
+  assert.deepEqual(sampled.liftModel.coefficients, [-0.1, 0.05]);
+  assert.equal(sampled.enableBuoyancy, false);
+});
+
 test('fixed zero uncertainty reproduces deterministic shot and probabilities sum to one', () => {
   const params = cleanVacuumParams();
   const deterministic = simulateShot(params, {dt: 0.002});

@@ -18,6 +18,9 @@ class Physics3DFixtureTests(unittest.TestCase):
                 "rk45",
                 "calibrated_drag_wind_robot",
                 "calibrated_lift_wind_robot",
+                "buoyancy",
+                "signed_lift",
+                "calibrated_drag_spin",
             ],
         )
 
@@ -31,6 +34,12 @@ class Physics3DFixtureTests(unittest.TestCase):
         self.assertEqual(lift_case["params"]["liftModel"]["kind"], "table2d")
         self.assertNotEqual(drag_case["params"]["wind"], [0.0, 0.0, 0.0])
         self.assertNotEqual(lift_case["params"]["wind"], [0.0, 0.0, 0.0])
+        buoyancy_case = next(case for case in fixture["cases"] if case["name"] == "buoyancy")
+        signed_case = next(case for case in fixture["cases"] if case["name"] == "signed_lift")
+        drag_spin_case = next(case for case in fixture["cases"] if case["name"] == "calibrated_drag_spin")
+        self.assertTrue(buoyancy_case["params"]["enableBuoyancy"])
+        self.assertLess(signed_case["params"]["liftModel"]["coefficients"][0], 0)
+        self.assertEqual(drag_spin_case["params"]["dragModel"]["kind"], "table2d")
 
 
 if __name__ == "__main__":

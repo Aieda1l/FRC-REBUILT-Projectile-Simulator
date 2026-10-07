@@ -1,6 +1,8 @@
 import math
 import unittest
 
+import calibration.fitting as fitting
+
 from calibration.fitting import (
     fit_drag_model,
     fit_lift_model,
@@ -8,6 +10,7 @@ from calibration.fitting import (
     parse_calibration_profile,
     split_shots,
     validate_profile,
+    _flight_parameters_for_shot,
 )
 from api.physics3d import FlightParameters, integrate_trajectory, launch_state
 
@@ -39,6 +42,24 @@ class CalibrationProfileTests(unittest.TestCase):
         self.assertEqual(profile["schema"], "frc-projectile-calibration-v1")
         self.assertEqual(profile["dragModel"]["kind"], "table1d")
         self.assertEqual(profile["liftModel"]["kind"], "table1d")
+
+    def test_profile_v1_accepts_2d_drag_and_signed_lift_tables(self):
+        profile = parse_calibration_profile({
+            **PROFILE,
+            "dragModel": {
+                "kind": "table2d",
+                "reynolds": [50000, 200000],
+                "spinParameters": [0, 1],
+                "coefficients": [[0.5, 0.45], [0.35, 0.3]],
+            },
+            "liftModel": {
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.1, 0.3],
+            },
+        })
+        self.assertEqual(profile["dragModel"]["kind"], "table2d")
+        self.assertEqual(profile["liftModel"]["coefficients"], [-0.1, 0.3])
 
     def test_unknown_schema_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -106,6 +127,22 @@ class CalibrationFittingTests(unittest.TestCase):
             "dynamic_viscosity": 1.81e-5,
         }
 
+
+    def test_flight_parameter_reconstruction_preserves_buoyancy_opt_out(self):
+        base = FlightParameters(enable_buoyancy=False)
+        shot = {
+            "position": [0, 0, 1],
+            "muzzleVelocity": [10, 0, 4],
+            "spin": [0, 0, 0],
+        }
+        rebuilt = _flight_parameters_for_shot(
+            shot,
+            base,
+            drag_model=base.drag_model,
+            lift_model=base.lift_model,
+        )
+        self.assertFalse(rebuilt.enable_buoyancy)
+
     def test_split_is_deterministic_for_seed(self):
         shots = [{"id": f"s{index}"} for index in range(12)]
         a_train, a_validation = split_shots(shots, 0.25, 2026)
@@ -116,6 +153,47 @@ class CalibrationFittingTests(unittest.TestCase):
             set(shot["id"] for shot in a_train)
             & set(shot["id"] for shot in a_validation)
         )
+
+
+    def test_spin_partition_uses_dimensionless_spin_parameter(self):
+        low_s_high_raw_spin = {
+            "id": "low-s",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [100, 0, 0],
+            "spin": [0, -20, 0],
+        }
+        high_s_low_raw_spin = {
+            "id": "high-s",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [1, 0, 0],
+            "spin": [0, -10, 0],
+        }
+        drag, spinning = fitting.partition_shots_by_spin_parameter(
+            [low_s_high_raw_spin, high_s_low_raw_spin],
+            self.base,
+            0.05,
+        )
+        self.assertEqual([shot["id"] for shot in drag], ["low-s"])
+        self.assertEqual([shot["id"] for shot in spinning], ["high-s"])
+
+    def test_spin_partition_includes_threshold_boundary_and_rejects_invalid_threshold(self):
+        boundary = {
+            "id": "boundary",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [10, 0, 0],
+            "spin": [0, -10, 0],
+        }
+        drag, spinning = fitting.partition_shots_by_spin_parameter(
+            [boundary],
+            self.base,
+            0.075,
+        )
+        self.assertEqual([shot["id"] for shot in drag], ["boundary"])
+        self.assertEqual(spinning, [])
+        for invalid in (-0.01, float("inf"), float("nan")):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    fitting.partition_shots_by_spin_parameter([boundary], self.base, invalid)
 
     def test_constant_drag_fit_recovers_synthetic_coefficient(self):
         truth = FlightParameters(
@@ -168,6 +246,42 @@ class CalibrationFittingTests(unittest.TestCase):
         self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
 
 
+
+    def test_lift_fit_can_recover_negative_coefficients(self):
+        drag_model = {"kind": "constant", "coefficient": 0.36}
+        truth = FlightParameters(
+            **self.base,
+            drag_model=drag_model,
+            lift_model={
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.2, -0.2],
+            },
+        )
+        train = [
+            synthetic_shot("n1", 10, 50, truth),
+            synthetic_shot("n2", 11, 80, truth),
+            synthetic_shot("n3", 12, 110, truth),
+            synthetic_shot("n4", 13, 140, truth),
+        ]
+        held_out = [synthetic_shot("negative-held", 11.5, 95, truth)]
+        fitted = fit_lift_model(train, self.base, drag_model, model_kind="table1d")
+        self.assertLess(min(fitted["coefficients"]), 0)
+        fitted_metrics = validate_profile(
+            held_out,
+            make_profile(drag_model, fitted),
+            self.base,
+        )
+        zero_metrics = validate_profile(
+            held_out,
+            make_profile(
+                drag_model,
+                {"kind": "table1d", "spinParameters": [0, 1], "coefficients": [0, 0]},
+            ),
+            self.base,
+        )
+        self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
+
     def test_validation_reports_entry_angle_and_clean_entry_confusion(self):
         def hub_shot(shot_id, x_cross, observed_result):
             launch_x, launch_z, vx = -3.0, 0.5, 2.0
@@ -175,7 +289,7 @@ class CalibrationFittingTests(unittest.TestCase):
             crossing_time = (x_cross - launch_x) / vx
             vz = (top_z - launch_z + 0.5 * 9.81 * crossing_time ** 2) / crossing_time
             truth = FlightParameters(
-                **self.base,
+                **{**self.base, "air_density": 0.0},
                 drag_coefficient=0.0,
                 lift_coefficient=0.0,
             )
@@ -198,6 +312,7 @@ class CalibrationFittingTests(unittest.TestCase):
                 "spin": [0.0, 0.0, 0.0],
                 "robotVelocity": [0.0, 0.0, 0.0],
                 "wind": [0.0, 0.0, 0.0],
+                "airDensity": 0.0,
                 "targetX": 0.0,
                 "targetLateralY": 0.0,
                 "observedHubResult": observed_result,

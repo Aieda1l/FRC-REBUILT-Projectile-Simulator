@@ -136,6 +136,7 @@ def _base_kwargs(base_params: Any) -> Dict[str, Any]:
             "wind": base_params.wind,
             "enable_drag": base_params.enable_drag,
             "enable_magnus": base_params.enable_magnus,
+            "enable_buoyancy": base_params.enable_buoyancy,
             "spin_decay_time_constant": base_params.spin_decay_time_constant,
         }
     if not isinstance(base_params, dict):
@@ -180,6 +181,26 @@ def _shot_initial_conditions(shot: Dict[str, Any], base_params: Any):
         speed=speed,
     )
     return reynolds, spin_value
+
+
+def partition_shots_by_spin_parameter(
+    shots: Sequence[Dict[str, Any]],
+    base_params: Any,
+    max_drag_spin_parameter: float,
+) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+    threshold = _finite(max_drag_spin_parameter, "max_drag_spin_parameter")
+    if threshold < 0:
+        raise ValueError("max_drag_spin_parameter must be non-negative")
+
+    drag_shots: list[Dict[str, Any]] = []
+    spinning_shots: list[Dict[str, Any]] = []
+    for shot in shots:
+        _, spin_value = _shot_initial_conditions(shot, base_params)
+        if spin_value <= threshold:
+            drag_shots.append(shot)
+        else:
+            spinning_shots.append(shot)
+    return drag_shots, spinning_shots
 
 
 def dataset_domain(shots: Sequence[Dict[str, Any]], base_params: Any) -> Dict[str, list[float]]:
@@ -408,7 +429,7 @@ def fit_lift_model(
         result = least_squares(
             residual,
             x0=np.full(count, 0.15),
-            bounds=(np.zeros(count), np.full(count, 3.0)),
+            bounds=(np.full(count, -3.0), np.full(count, 3.0)),
         )
         return normalize_lift_model({
             "kind": "table1d",
@@ -440,7 +461,7 @@ def fit_lift_model(
         result = least_squares(
             residual,
             x0=np.full(4, 0.15),
-            bounds=(np.zeros(4), np.full(4, 3.0)),
+            bounds=(np.full(4, -3.0), np.full(4, 3.0)),
         )
         return normalize_lift_model({
             "kind": "table2d",

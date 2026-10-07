@@ -92,6 +92,10 @@ def _scale_drag_model(model: Dict[str, Any] | None, factor: float):
         out["coefficient"] *= factor
     elif out["kind"] == "table1d":
         out["coefficients"] = [value * factor for value in out["coefficients"]]
+    elif out["kind"] == "table2d":
+        out["coefficients"] = [
+            [value * factor for value in row] for row in out["coefficients"]
+        ]
     else:
         raise ValueError(f"cannot scale drag model kind: {out.get('kind')}")
     return out
@@ -324,6 +328,7 @@ def _simulate_shot(params, dt):
         drag_model=params.get("dragModel"), lift_model=params.get("liftModel"),
         gravity=params.get("gravity", 9.81), wind=tuple(params.get("wind", (0.0, 0.0, 0.0))),
         enable_drag=params.get("enableDrag", True), enable_magnus=params.get("enableMagnus", True),
+        enable_buoyancy=params.get("enableBuoyancy", True),
         spin_decay_time_constant=params.get("spinDecayTimeConstant"),
     )
     samples = integrate_trajectory(initial, flight, method="rk4", dt=dt, max_time=5.0)

@@ -13,7 +13,7 @@ def clean_vacuum_params():
         "launchX": launch_x, "launchY": launch_y, "velocity": math.hypot(vx, vz),
         "angleDeg": math.degrees(math.atan2(vz, vx)), "spinRPM": 0.0,
         "mass": 0.215, "radius": 0.075, "dragCoeff": 0.47, "liftCoeff": 0.25,
-        "airDensity": 1.204, "gravity": 9.81, "enableDrag": False, "enableMagnus": False,
+        "airDensity": 1.204, "gravity": 9.81, "enableDrag": False, "enableMagnus": False, "enableBuoyancy": False,
         "targetX": 0.0, "targetLateralY": 0.0, "robotVelocity": [0.0, 0.0, 0.0], "wind": [0.0, 0.0, 0.0],
     }
 
@@ -50,6 +50,34 @@ class UncertaintyTests(unittest.TestCase):
         self.assertAlmostEqual(sampled["liftCoeff"], 0.25 * 0.8)
         self.assertEqual(sampled["robotVelocity"], [0.2, -0.1, 0.0])
         self.assertEqual(sampled["wind"], [0.5, 0.0, 0.0])
+
+
+    def test_uncertainty_scaling_supports_2d_drag_and_preserves_signed_lift(self):
+        base = {
+            **clean_vacuum_params(),
+            "dragModel": {
+                "kind": "table2d",
+                "reynolds": [50000, 200000],
+                "spinParameters": [0, 1],
+                "coefficients": [[0.2, 0.4], [0.3, 0.5]],
+            },
+            "liftModel": {
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.2, 0.1],
+            },
+        }
+        sampled = sample_shot_params(
+            base,
+            {
+                "dragMultiplier": {"kind": "fixed", "value": 2},
+                "liftMultiplier": {"kind": "fixed", "value": 0.5},
+            },
+            create_seeded_rng(9),
+        )
+        self.assertEqual(sampled["dragModel"]["coefficients"], [[0.4, 0.8], [0.6, 1.0]])
+        self.assertEqual(sampled["liftModel"]["coefficients"], [-0.1, 0.05])
+        self.assertFalse(sampled["enableBuoyancy"])
 
     def test_fixed_zero_uncertainty_is_a_clean_entry(self):
         result = evaluate_shot_uncertainty(

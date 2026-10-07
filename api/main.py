@@ -61,6 +61,7 @@ class Sim3DRequest(BaseModel):
     spin_decay_time_constant: Optional[float] = Field(default=None, gt=0)
     enable_drag: bool = True
     enable_magnus: bool = True
+    enable_buoyancy: bool = True
 
     @model_validator(mode="after")
     def validate_step_bounds(self):
@@ -107,6 +108,7 @@ async def simulate3d(data: Sim3DRequest):
             wind=data.wind,
             enable_drag=data.enable_drag,
             enable_magnus=data.enable_magnus,
+            enable_buoyancy=data.enable_buoyancy,
             spin_decay_time_constant=data.spin_decay_time_constant,
         )
         initial = launch_state(

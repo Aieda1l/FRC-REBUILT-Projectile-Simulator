@@ -4,7 +4,7 @@ This guide describes a measurement-first workflow for replacing the simulator's 
 
 ## What calibration can and cannot fix
 
-The numerical integrator is already much more precise than typical FRC measurement error. Calibration therefore focuses on the uncertain parts of the physical model: launch state, drag, Magnus lift, and—only when directly measured—spin decay.
+The numerical integrator is already much more precise than typical FRC measurement error. Calibration therefore focuses on the uncertain parts of the physical model: launch state, drag, Magnus lift, and—only when directly measured—spin decay. The flight engine also includes buoyancy by default from ball volume, air density, and gravity.
 
 A calibration profile does **not** make the simulator a CFD model. It also does not model foam deformation, favorable rim bounce, panel friction, or internal HUB interactions. The scoring model remains intentionally conservative: clean entries count; modeled rim or funnel contact does not.
 
@@ -84,19 +84,28 @@ pip install -r requirements-calibration.txt
 Then run:
 
 ```bash
-python scripts/calibrate_fuel.py shots.json \
+python -m scripts.calibrate_fuel shots.json \
   --output fuel-profile.json \
   --validation-fraction 0.2 \
-  --seed 2026
+  --seed 2026 \
+  --drag-max-spin-parameter 0.05
 ```
 
 The calibration workflow is staged:
 
-1. fit drag from low-spin data;
-2. hold drag fixed and fit lift from spinning data;
-3. fit spin decay only if spin-versus-time measurements are available.
+1. split the dataset into training and held-out validation shots;
+2. within the training set, select drag shots with dimensionless spin parameter $S \leq 0.05$ by default;
+3. fit drag only from that low-spin subset;
+4. hold drag fixed and fit lift from the remaining spinning training shots;
+5. fit spin decay only if spin-versus-time measurements are available.
 
-The fitter uses bounded least-squares optimization and regularizes multi-knot tables. It rejects a requested table complexity when the dataset cannot support it.
+The threshold is controlled by `--drag-max-spin-parameter`. It is a **data-selection rule**, not an aerodynamic coefficient, and it can be changed explicitly when your measurement setup justifies a different low-spin boundary. The tool reports how many training shots went to each subset.
+
+If no training shot is at or below the configured threshold, calibration stops instead of allowing Magnus-affected trajectories to bias the drag fit. Collect low-spin shots when possible; otherwise, raise `--drag-max-spin-parameter` explicitly and understand that the separation between drag and lift becomes weaker. Held-out validation shots are never borrowed to satisfy the drag fit.
+
+The fitter uses bounded least-squares optimization and regularizes multi-knot tables. Lift tables may fit signed coefficients. It rejects a requested table complexity when the dataset cannot support it.
+
+The engine can evaluate supplied two-dimensional $C_d(Re,S)$ tables, but this calibration tool intentionally does **not** fit them automatically. Separating spin-dependent drag from Magnus lift using trajectory observations alone is an identifiability problem that needs a purpose-built experiment rather than more optimizer parameters.
 
 ## Validate on held-out shots
 
@@ -151,3 +160,5 @@ A profile should be treated as configuration-specific. Recalibrate or at least r
 - operating well outside the original speed/spin range.
 
 Do not extrapolate a profile far beyond its recorded Reynolds or spin-parameter domain. A clamp warning is a signal to collect more data, not a guarantee that the boundary coefficient remains valid.
+
+If a profile was fitted with a simulator version that did not include buoyancy, revalidate it with the current engine. Older fitted drag or lift coefficients may have partially absorbed the previously missing upward force.

@@ -49,11 +49,32 @@ class ApiTests(unittest.TestCase):
             muzzle_velocity=(0, 0, 0),
             spin=(0, 0, 0),
             gravity=3.0,
+            air_density=0.0,
             enable_drag=False,
             enable_magnus=False,
             max_time=0.1,
         )))
         self.assertAlmostEqual(response["samples"][-1]["velocity"][2], -0.3, places=6)
+
+
+    def test_simulate3d_exposes_and_forwards_buoyancy_toggle(self):
+        default_request = Sim3DRequest(
+            position=(0, 0, 10),
+            muzzle_velocity=(1, 0, 0),
+            spin=(0, 0, 0),
+        )
+        self.assertTrue(default_request.enable_buoyancy)
+
+        response = asyncio.run(simulate3d(Sim3DRequest(
+            position=(0, 0, 10),
+            muzzle_velocity=(1, 0, 0),
+            spin=(0, 0, 0),
+            enable_drag=False,
+            enable_magnus=False,
+            enable_buoyancy=False,
+            max_time=0.1,
+        )))
+        self.assertAlmostEqual(response["samples"][-1]["velocity"][2], -0.981, places=8)
 
     def test_simulate3d_converts_integration_error_to_http_400(self):
         request = Sim3DRequest(
