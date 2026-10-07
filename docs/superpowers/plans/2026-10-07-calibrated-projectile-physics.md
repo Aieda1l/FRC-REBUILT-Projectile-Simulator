@@ -53,6 +53,13 @@
   - `evaluateLiftModel(model, reynolds, spinParameterValue) -> {coefficient, clamped}`
 - Produces Python snake_case equivalents with identical model schemas and numeric semantics.
 
+  Exact model JSON shapes:
+  - Drag constant: `{kind: "constant", coefficient: number}`
+  - Drag table: `{kind: "table1d", reynolds: number[], coefficients: number[]}`
+  - Legacy lift: `{kind: "legacy-spin-cap", maxCoefficient: number, saturationSpin?: number}`
+  - Lift 1-D table: `{kind: "table1d", spinParameters: number[], coefficients: number[]}`
+  - Lift 2-D table: `{kind: "table2d", reynolds: number[], spinParameters: number[], coefficients: number[][]}`, where rows follow `reynolds` and columns follow `spinParameters`.
+
 - [ ] **Step 1: Write failing parity/validation tests**
   - Assert `Re = rho * speed * diameter / mu`.
   - Assert spin parameter is zero for `speed <= 1e-12`.
