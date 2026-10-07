@@ -193,7 +193,7 @@ class CalibrationFittingTests(unittest.TestCase):
             crossing_time = (x_cross - launch_x) / vx
             vz = (top_z - launch_z + 0.5 * 9.81 * crossing_time ** 2) / crossing_time
             truth = FlightParameters(
-                **self.base,
+                **{**self.base, "air_density": 0.0},
                 drag_coefficient=0.0,
                 lift_coefficient=0.0,
             )
@@ -216,6 +216,7 @@ class CalibrationFittingTests(unittest.TestCase):
                 "spin": [0.0, 0.0, 0.0],
                 "robotVelocity": [0.0, 0.0, 0.0],
                 "wind": [0.0, 0.0, 0.0],
+                "airDensity": 0.0,
                 "targetX": 0.0,
                 "targetLateralY": 0.0,
                 "observedHubResult": observed_result,

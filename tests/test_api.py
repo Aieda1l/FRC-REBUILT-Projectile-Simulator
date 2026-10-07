@@ -49,6 +49,7 @@ class ApiTests(unittest.TestCase):
             muzzle_velocity=(0, 0, 0),
             spin=(0, 0, 0),
             gravity=3.0,
+            air_density=0.0,
             enable_drag=False,
             enable_magnus=False,
             max_time=0.1,

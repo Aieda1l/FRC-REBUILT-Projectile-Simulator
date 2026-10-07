@@ -257,6 +257,7 @@ function vacuumShotThroughTopAt(xCross) {
     angleDeg: Math.atan2(vz, vx) * 180 / Math.PI,
     enableDrag: false,
     enableMagnus: false,
+    airDensity: 0,
     targetX: 0,
   });
 }
