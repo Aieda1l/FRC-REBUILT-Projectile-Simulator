@@ -64,8 +64,8 @@ test('Toggle knob visibly follows checked state without relying on nested peer s
 
 test('3-D view receives ideal and envelope samples from existing toggles', async () => {
   const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
-  assert.match(source, /idealSamples=\{showIdeal/);
-  assert.match(source, /envelopeSamples=\{showEnvelope/);
+  assert.match(source, /idealSamples={showIdeal/);
+  assert.match(source, /envelopeSamples={showEnvelope/);
   assert.ok(source.includes('idealResult?.samples3d'));
   assert.ok(source.includes('envelopeResults.map((entry) => entry.samples3d)'));
 });
