@@ -60,3 +60,21 @@ test('Toggle knob visibly follows checked state without relying on nested peer s
   const source = await readFile(new URL('../src/Toggle.jsx', import.meta.url), 'utf8');
   assert.match(source, /checked\s*\?\s*['"]translate-x-5['"]\s*:\s*['"]translate-x-0\.5['"]/);
 });
+
+
+test('3-D view receives ideal and envelope samples from existing toggles', async () => {
+  const source = await readFile(new URL('../src/TrajectorySimulator.jsx', import.meta.url), 'utf8');
+  assert.match(source, /idealSamples=\{showIdeal/);
+  assert.match(source, /envelopeSamples=\{showEnvelope/);
+  assert.ok(source.includes('idealResult?.samples3d'));
+  assert.ok(source.includes('envelopeResults.map((entry) => entry.samples3d)'));
+});
+
+test('3-D renderer has distinct ideal and envelope styles', async () => {
+  const source = await readFile(new URL('../src/Trajectory3DView.jsx', import.meta.url), 'utf8');
+  assert.match(source, /idealSamples/);
+  assert.match(source, /envelopeSamples/);
+  assert.match(source, /strokeDasharray/);
+  assert.match(source, /#22d3ee/);
+  assert.match(source, /#f59e0b/);
+});
