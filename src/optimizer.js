@@ -12,6 +12,26 @@ const CLASSIFICATION_RANK = {
   miss: 1,
 };
 
+function interactionOf(result) {
+  return result.scoringInteraction ?? result.hubInteraction;
+}
+
+function interactionIsScore(interaction) {
+  if (typeof interaction?.isScore === 'boolean') return interaction.isScore;
+  return interaction?.classification === 'clean-entry';
+}
+
+function interactionRank(interaction) {
+  if (Number.isFinite(interaction?.scoreRank)) return Number(interaction.scoreRank);
+  if (interactionIsScore(interaction)) return 3;
+  if (interaction?.status === 'collision') return 2;
+  return CLASSIFICATION_RANK[interaction?.classification] ?? 0;
+}
+
+function robustScoreProbability(robust) {
+  return robust?.scoreProbability ?? robust?.probabilities?.['clean-entry'] ?? 0;
+}
+
 function referenceDistance(candidate, reference) {
   const referenceAzimuth = reference.azimuth ?? 0;
   return Math.hypot(
@@ -49,20 +69,17 @@ function lateralCompensation(params, velocity, angle) {
 }
 
 export function rankCandidate(a, b, reference) {
-  const ia = a.result.hubInteraction;
-  const ib = b.result.hubInteraction;
-  const rankA = CLASSIFICATION_RANK[ia.classification] ?? 0;
-  const rankB = CLASSIFICATION_RANK[ib.classification] ?? 0;
+  const ia = interactionOf(a.result);
+  const ib = interactionOf(b.result);
+  const rankA = interactionRank(ia);
+  const rankB = interactionRank(ib);
 
   if (rankA !== rankB) return rankB - rankA;
 
-  if (ia.classification === 'clean-entry') {
+  if (interactionIsScore(ia)) {
     const diff = (ib.clearanceMargin ?? -Infinity) - (ia.clearanceMargin ?? -Infinity);
     if (diff !== 0) return diff;
-  } else if (
-    ia.classification === 'rim-collision'
-    || ia.classification === 'funnel-collision'
-  ) {
+  } else if (ia.status === 'collision') {
     const diff = (ib.clearanceMargin ?? -Infinity) - (ia.clearanceMargin ?? -Infinity);
     if (diff !== 0) return diff;
   } else {
@@ -75,8 +92,8 @@ export function rankCandidate(a, b, reference) {
 }
 
 export function rankRobustCandidate(a, b, reference) {
-  const probabilityA = a.robust?.probabilities?.['clean-entry'] ?? 0;
-  const probabilityB = b.robust?.probabilities?.['clean-entry'] ?? 0;
+  const probabilityA = robustScoreProbability(a.robust);
+  const probabilityB = robustScoreProbability(b.robust);
   if (probabilityA !== probabilityB) return probabilityB - probabilityA;
 
   const clearanceA = a.robust?.clearance?.p10 ?? -Infinity;
@@ -139,8 +156,8 @@ function createEvaluator(params, callbacks, totalCandidates) {
         evaluatedCandidates,
         totalCandidates,
         bestCandidate,
-        classification: bestCandidate.result.hubInteraction.classification,
-        clearanceMargin: bestCandidate.result.hubInteraction.clearanceMargin,
+        classification: interactionOf(bestCandidate.result).classification,
+        clearanceMargin: interactionOf(bestCandidate.result).clearanceMargin,
       });
     }
     return candidate;
@@ -152,8 +169,8 @@ function createEvaluator(params, callbacks, totalCandidates) {
         evaluatedCandidates,
         totalCandidates,
         bestCandidate,
-        classification: bestCandidate?.result.hubInteraction.classification ?? 'miss',
-        clearanceMargin: bestCandidate?.result.hubInteraction.clearanceMargin ?? -Infinity,
+        classification: interactionOf(bestCandidate?.result ?? {}).classification ?? 'miss',
+        clearanceMargin: interactionOf(bestCandidate?.result ?? {}).clearanceMargin ?? -Infinity,
       });
     }
   };
@@ -184,16 +201,16 @@ function uniqueCandidates(candidates) {
 function finalize(candidates, evaluator) {
   const ranked = sortCandidates(uniqueCandidates(candidates), evaluator.reference);
   const bestNearMiss = ranked.find(
-    (candidate) => candidate.result.hubInteraction.classification !== 'clean-entry',
+    (candidate) => !interactionIsScore(interactionOf(candidate.result)),
   ) ?? null;
   const anyLateralCompensationFeasible = ranked.some(
     (candidate) => candidate.lateralCompensationFeasible !== false,
   );
 
   for (const candidate of ranked) {
-    if (candidate.result.hubInteraction.classification !== 'clean-entry') continue;
+    if (!interactionIsScore(interactionOf(candidate.result))) continue;
     const validated = evaluator.evaluate(candidate.velocity, candidate.angle, 0.001);
-    if (validated.result.hubInteraction.classification === 'clean-entry') {
+    if (interactionIsScore(interactionOf(validated.result))) {
       evaluator.emitFinalProgress();
       return {
         solution: validated,
@@ -308,7 +325,7 @@ export function optimizeRobust(params, {
   const search = searcher(params, callbacks);
   const ranked = sortCandidates(uniqueCandidates(search.candidates), search.evaluator.reference);
   const clean = ranked.filter((candidate) => (
-    candidate.result.hubInteraction.classification === 'clean-entry'
+    interactionIsScore(interactionOf(candidate.result))
   ));
   const shortlist = (clean.length ? clean : ranked).slice(0, 10);
   const robustCandidates = shortlist.map((candidate, index) => {
@@ -328,7 +345,8 @@ export function optimizeRobust(params, {
       evaluatedCandidates: index + 1,
       totalCandidates: shortlist.length,
       bestCandidate: evaluated,
-      cleanEntryProbability: robust.probabilities['clean-entry'],
+      cleanEntryProbability: robustScoreProbability(robust),
+      scoreProbability: robustScoreProbability(robust),
       clearanceP10: robust.clearance.p10,
     });
     return evaluated;
@@ -337,10 +355,10 @@ export function optimizeRobust(params, {
   robustCandidates.sort((a, b) => rankRobustCandidate(a, b, search.evaluator.reference));
   const best = robustCandidates[0] ?? null;
   const bestNearMiss = ranked.find(
-    (candidate) => candidate.result.hubInteraction.classification !== 'clean-entry',
+    (candidate) => !interactionIsScore(interactionOf(candidate.result)),
   ) ?? null;
 
-  if (!best || best.result.hubInteraction.classification !== 'clean-entry') {
+  if (!best || !interactionIsScore(interactionOf(best.result))) {
     return {
       solution: null,
       bestNearMiss: bestNearMiss ?? search.evaluator.bestCandidate,
@@ -356,7 +374,7 @@ export function optimizeRobust(params, {
     azimuthDeg: best.azimuth,
   };
   const result = simulateShot(finalParams, {dt: 0.001});
-  if (result.hubInteraction.classification !== 'clean-entry') {
+  if (!interactionIsScore(interactionOf(result))) {
     return {
       solution: null,
       bestNearMiss: {...best, result},
