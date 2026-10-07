@@ -1,4 +1,5 @@
 import React, {useState, useEffect, useCallback, useMemo} from 'react';
+import {simulateTrajectory2D} from './trajectory2d.js';
 
 // Physics constants and utilities
 const DEG_TO_RAD = Math.PI / 180;
@@ -34,110 +35,8 @@ const estimateExitVelocity = (flywheelDia, flywheelRPM) => {
     return surfaceSpeed * 0.55; // ~55% efficiency for single flywheel
 };
 
-// Physics simulation with air drag and Magnus effect
-const simulateTrajectory = (params) => {
-    const {
-        launchX, launchY, velocity, angleDeg, spinRPM,
-        mass, radius, dragCoeff, liftCoeff,
-        airDensity, gravity,
-        enableDrag, enableMagnus,
-        targetX, targetY, targetRadius
-    } = params;
-
-    const dt = 0.001;
-    const maxTime = 5.0;
-
-    const angleRad = angleDeg * DEG_TO_RAD;
-    let x = launchX;
-    let y = launchY;
-    let vx = velocity * Math.cos(angleRad);
-    let vy = velocity * Math.sin(angleRad);
-    let spin = spinRPM * 2 * Math.PI / 60; // Convert to rad/s
-    let t = 0;
-
-    const crossSection = Math.PI * radius * radius;
-    const dragFactor = enableDrag ? 0.5 * airDensity * crossSection * dragCoeff : 0;
-    // Dynamic-pressure/area term only; effectiveCl is applied exactly once below.
-    const magnusFactor = enableMagnus ? 0.5 * airDensity * crossSection : 0;
-
-    const points = [{t, x, y, vx, vy, speed: velocity}];
-    let maxHeight = y;
-    let hitTarget = false;
-    let impactPoint = null;
-    let entryVelocity = null;
-    let entryAngle = null;
-
-    while (t < maxTime && y >= 0) {
-        const speed = Math.sqrt(vx * vx + vy * vy);
-
-        // Acceleration from gravity
-        let ax = 0;
-        let ay = -gravity;
-
-        // Air drag
-        if (speed > 0.001 && dragFactor > 0) {
-            const dragMag = dragFactor * speed * speed;
-            ax -= (dragMag * vx / speed) / mass;
-            ay -= (dragMag * vy / speed) / mass;
-        }
-
-        // Magnus effect (backspin creates lift)
-        if (speed > 0.001 && Math.abs(spin) > 0.001 && magnusFactor > 0) {
-            const spinParam = Math.abs(spin) * radius / speed;
-            const effectiveCl = liftCoeff * Math.min(spinParam, 0.5) * 2;
-            const magnusMag = magnusFactor * effectiveCl * speed * speed;
-            const sign = Math.sign(spin);
-            ax += (-sign * magnusMag * vy / speed) / mass;
-            ay += (sign * magnusMag * vx / speed) / mass;
-        }
-
-        // Small fixed-step integrator. Milestone 2 replaces this with true RK4/RK45.
-        x += vx * dt + 0.5 * ax * dt * dt;
-        y += vy * dt + 0.5 * ay * dt * dt;
-        vx += ax * dt;
-        vy += ay * dt;
-        // Keep spin constant until FUEL spin-down has been measured/calibrated.
-        t += dt;
-
-        maxHeight = Math.max(maxHeight, y);
-
-        // Check target intersection
-        if (y <= targetY && points.length > 1 && points[points.length - 1].y > targetY) {
-            const prev = points[points.length - 1];
-            const alpha = (targetY - prev.y) / (y - prev.y);
-            const crossX = prev.x + alpha * (x - prev.x);
-            const crossVx = prev.vx + alpha * (vx - prev.vx);
-            const crossVy = prev.vy + alpha * (vy - prev.vy);
-
-            if (Math.abs(crossX - targetX) <= targetRadius) {
-                hitTarget = true;
-                impactPoint = {x: crossX, y: targetY};
-                entryVelocity = Math.sqrt(crossVx * crossVx + crossVy * crossVy);
-                entryAngle = Math.atan2(crossVy, crossVx) * RAD_TO_DEG;
-            }
-        }
-
-        // Sample points (every 5ms for display)
-        if (Math.floor(t * 200) > Math.floor((t - dt) * 200)) {
-            points.push({t, x, y, vx, vy, speed: Math.sqrt(vx * vx + vy * vy)});
-        }
-    }
-
-    if (!impactPoint) {
-        impactPoint = {x, y: Math.max(0, y)};
-    }
-
-    return {
-        points,
-        hitTarget,
-        impactPoint,
-        flightTime: t,
-        maxHeight,
-        range: x - launchX,
-        entryVelocity,
-        entryAngle
-    };
-};
+// Browser simulation delegates to the canonical 3-D RK4 engine.
+const simulateTrajectory = simulateTrajectory2D;
 
 // Compute ideal (no drag) angle analytically
 const computeIdealAngle = (launchX, launchY, targetX, targetY, velocity, gravity) => {

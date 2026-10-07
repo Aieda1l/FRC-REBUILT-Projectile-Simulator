@@ -15,6 +15,8 @@ from typing import Tuple, List, Optional, Callable
 from enum import Enum
 import warnings
 
+from .physics3d import FlightParameters, integrate_trajectory, launch_state
+
 
 class GamePiece(Enum):
     """Common FRC game piece types with their physical properties."""
@@ -309,19 +311,42 @@ class PhysicsEngine:
 
 
 class TrajectorySimulator:
-    """
-    Main trajectory simulator with various solving methods.
-    """
+    """Legacy 2-D adapter over the canonical 3-D physics engine."""
 
     def __init__(
             self,
             physics: PhysicsEngine,
-            dt: float = 0.001,  # Time step in seconds
-            max_time: float = 5.0  # Maximum simulation time
+            dt: float = 0.001,
+            max_time: float = 5.0
     ):
         self.physics = physics
         self.dt = dt
         self.max_time = max_time
+
+    def _flight_parameters(self) -> FlightParameters:
+        piece = self.physics.piece
+        env = self.physics.env
+        return FlightParameters(
+            mass=piece.mass,
+            radius=piece.radius,
+            drag_coefficient=piece.drag_coefficient,
+            lift_coefficient=piece.lift_coefficient,
+            air_density=env.air_density,
+            gravity=env.gravity,
+            spin_decay_time_constant=piece.spin_decay_time_constant,
+        )
+
+    @staticmethod
+    def _legacy_point(sample) -> TrajectoryPoint:
+        state = sample.state
+        return TrajectoryPoint(
+            time=sample.time,
+            x=float(state[0]),
+            y=float(state[2]),
+            vx=float(state[3]),
+            vy=float(state[5]),
+            spin=float(-state[7]),
+        )
 
     def simulate(
             self,
@@ -329,140 +354,85 @@ class TrajectorySimulator:
             target: Optional[Target] = None,
             method: str = "rk4"
     ) -> TrajectoryResult:
-        """
-        Simulate the trajectory from launch to ground impact or target.
+        if method == "euler":
+            raise ValueError("Euler integration is no longer supported")
+        if method == "adaptive":
+            core_method = "rk45"
+        elif method in ("rk4", "rk45"):
+            core_method = method
+        else:
+            raise ValueError("method must be 'rk4', 'rk45', or 'adaptive'")
 
-        Args:
-            launch: Launch parameters (position, velocity, angle, spin)
-            target: Optional target to check for hits
-            method: Integration method ("euler", "rk4", "adaptive")
+        x0, z0 = launch.position
+        vx0, vz0 = launch.velocity_vector
+        initial = launch_state(
+            (x0, 0.0, z0),
+            (vx0, 0.0, vz0),
+            (0.0, -launch.spin_rate, 0.0),
+        )
+        params = self._flight_parameters()
 
-        Returns:
-            TrajectoryResult with full trajectory data
-        """
-        # Initial conditions
-        x, y = launch.position
-        vx, vy = launch.velocity_vector
-        spin = launch.spin_rate
-        t = 0.0
+        hit_target = False
+        impact_point = None
+        entry_velocity = None
+        entry_angle = None
+        selected_samples = None
 
-        points = [TrajectoryPoint(t, x, y, vx, vy, spin)]
-        max_height = y
+        if target is not None:
+            target_samples = integrate_trajectory(
+                initial,
+                params,
+                method=core_method,
+                dt=self.dt,
+                max_time=self.max_time,
+                terminal_height=target.position[1],
+                terminal_direction=-1,
+            )
+            crossing = target_samples[-1]
+            if abs(float(crossing.state[2]) - target.position[1]) <= 1e-9:
+                dx = float(crossing.state[0]) - target.position[0]
+                dy = float(crossing.state[1])
+                if np.hypot(dx, dy) <= target.entry_radius:
+                    hit_target = True
+                    selected_samples = target_samples
+                    impact_point = (float(crossing.state[0]), target.position[1])
+                    horizontal_speed = np.hypot(crossing.state[3], crossing.state[4])
+                    entry_velocity = float(np.linalg.norm(crossing.state[3:6]))
+                    entry_angle = float(np.degrees(np.arctan2(
+                        crossing.state[5], horizontal_speed
+                    )))
 
-        # Integration loop
-        while t < self.max_time and y >= 0:
-            if method == "euler":
-                x, y, vx, vy, spin = self._euler_step(x, y, vx, vy, spin)
-            elif method == "rk4":
-                x, y, vx, vy, spin = self._rk4_step(x, y, vx, vy, spin)
-            else:
-                x, y, vx, vy, spin = self._rk4_step(x, y, vx, vy, spin)
+        if selected_samples is None:
+            selected_samples = integrate_trajectory(
+                initial,
+                params,
+                method=core_method,
+                dt=self.dt,
+                max_time=self.max_time,
+                terminal_height=0.0,
+                terminal_direction=-1,
+            )
 
-            t += self.dt
-            points.append(TrajectoryPoint(t, x, y, vx, vy, spin))
-            max_height = max(max_height, y)
+        points = [self._legacy_point(sample) for sample in selected_samples]
+        final = selected_samples[-1]
+        max_height = max(point.y for point in points)
+        if impact_point is None:
+            impact_point = (float(final.state[0]), max(0.0, float(final.state[2])))
 
-            # Check if we've passed the target
-            if target and y <= target.position[1] and len(points) > 2:
-                prev = points[-2]
-                if prev.y > target.position[1]:
-                    # Interpolate to find exact crossing point
-                    alpha = (target.position[1] - prev.y) / (y - prev.y)
-                    cross_x = prev.x + alpha * (x - prev.x)
-                    cross_vx = prev.vx + alpha * (vx - prev.vx)
-                    cross_vy = prev.vy + alpha * (vy - prev.vy)
-
-                    entry_left, entry_right = target.get_entry_bounds()
-                    if entry_left <= cross_x <= entry_right:
-                        # Hit the target!
-                        result = TrajectoryResult(
-                            points=points,
-                            launch_params=launch,
-                            target=target,
-                            hit_target=True,
-                            impact_point=(cross_x, target.position[1]),
-                            flight_time=t,
-                            max_height=max_height,
-                            range_distance=cross_x - launch.position[0],
-                            entry_velocity=np.sqrt(cross_vx ** 2 + cross_vy ** 2),
-                            entry_angle=np.degrees(np.arctan2(cross_vy, cross_vx))
-                        )
-                        return result
-
-        # Didn't hit target or simulation ended
-        result = TrajectoryResult(
+        return TrajectoryResult(
             points=points,
             launch_params=launch,
             target=target,
-            hit_target=False,
-            impact_point=(x, max(0, y)),
-            flight_time=t,
+            hit_target=hit_target,
+            impact_point=impact_point,
+            flight_time=float(final.time),
             max_height=max_height,
-            range_distance=x - launch.position[0]
+            range_distance=float(final.state[0] - x0),
+            entry_velocity=entry_velocity,
+            entry_angle=entry_angle,
         )
-        return result
-
-    def _euler_step(
-            self,
-            x: float, y: float,
-            vx: float, vy: float,
-            spin: float
-    ) -> Tuple[float, float, float, float, float]:
-        """Simple Euler integration step."""
-        ax, ay = self.physics.compute_acceleration(x, y, vx, vy, spin)
-
-        x_new = x + vx * self.dt
-        y_new = y + vy * self.dt
-        vx_new = vx + ax * self.dt
-        vy_new = vy + ay * self.dt
-        spin_new = self.physics.compute_spin_decay(spin, vx, vy, self.dt)
-
-        return x_new, y_new, vx_new, vy_new, spin_new
-
-    def _rk4_step(
-            self,
-            x: float, y: float,
-            vx: float, vy: float,
-            spin: float
-    ) -> Tuple[float, float, float, float, float]:
-        """Fourth-order Runge-Kutta integration step."""
-        dt = self.dt
-
-        # k1
-        ax1, ay1 = self.physics.compute_acceleration(x, y, vx, vy, spin)
-
-        # k2
-        x2 = x + 0.5 * dt * vx
-        y2 = y + 0.5 * dt * vy
-        vx2 = vx + 0.5 * dt * ax1
-        vy2 = vy + 0.5 * dt * ay1
-        ax2, ay2 = self.physics.compute_acceleration(x2, y2, vx2, vy2, spin)
-
-        # k3
-        x3 = x + 0.5 * dt * vx2
-        y3 = y + 0.5 * dt * vy2
-        vx3 = vx + 0.5 * dt * ax2
-        vy3 = vy + 0.5 * dt * ay2
-        ax3, ay3 = self.physics.compute_acceleration(x3, y3, vx3, vy3, spin)
-
-        # k4
-        x4 = x + dt * vx3
-        y4 = y + dt * vy3
-        vx4 = vx + dt * ax3
-        vy4 = vy + dt * ay3
-        ax4, ay4 = self.physics.compute_acceleration(x4, y4, vx4, vy4, spin)
-
-        # Combine
-        x_new = x + (dt / 6.0) * (vx + 2 * vx2 + 2 * vx3 + vx4)
-        y_new = y + (dt / 6.0) * (vy + 2 * vy2 + 2 * vy3 + vy4)
-        vx_new = vx + (dt / 6.0) * (ax1 + 2 * ax2 + 2 * ax3 + ax4)
-        vy_new = vy + (dt / 6.0) * (ay1 + 2 * ay2 + 2 * ay3 + ay4)
-        spin_new = self.physics.compute_spin_decay(spin, vx, vy, dt)
-
-        return x_new, y_new, vx_new, vy_new, spin_new
 
 
-@dataclass
 class ShooterConfig:
     """Configuration for a flywheel shooter to estimate backspin."""
     flywheel_diameter: float  # inches

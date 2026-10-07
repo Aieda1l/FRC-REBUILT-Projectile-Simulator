@@ -6,6 +6,7 @@ import numpy as np
 
 from api.physics3d import (
     FlightParameters,
+    IntegrationError,
     derivatives,
     integrate_trajectory,
     launch_state,
@@ -17,6 +18,37 @@ class Physics3DTests(unittest.TestCase):
     def setUp(self):
         self.vacuum = FlightParameters(enable_drag=False, enable_magnus=False)
 
+
+    def test_launch_state_has_canonical_order_and_float64(self):
+        state = launch_state((1, 2, 3), (4, 5, 6), (7, 8, 9), (10, 11, 12))
+        np.testing.assert_allclose(state, [1, 2, 3, 14, 16, 18, 7, 8, 9])
+        self.assertEqual(state.dtype, np.float64)
+
+    def test_rejects_wrong_vector_length_and_nonfinite_values(self):
+        with self.assertRaises(ValueError):
+            launch_state((0, 0), (1, 0, 0), (0, 0, 0))
+        with self.assertRaises(ValueError):
+            launch_state((0, 0, float("nan")), (1, 0, 0), (0, 0, 0))
+
+    def test_rejects_invalid_physical_parameters(self):
+        with self.assertRaises(ValueError):
+            FlightParameters(mass=0)
+        with self.assertRaises(ValueError):
+            FlightParameters(spin_decay_time_constant=0)
+
+    def test_zero_relative_airflow_has_no_aerodynamic_acceleration(self):
+        state = launch_state((0, 0, 1), (10, 0, 0), (0, -100, 0))
+        dv = derivatives(state, FlightParameters(wind=(10, 0, 0)))
+        np.testing.assert_allclose(dv[3:6], [0, 0, -9.81])
+
+    def test_magnus_acceleration_is_perpendicular_to_airflow(self):
+        params = FlightParameters(enable_drag=False, wind=(1.0, -2.0, 0.5))
+        state = launch_state((0, 0, 2), (11, 3, 4), (20, -100, 30))
+        dv = derivatives(state, params)
+        u = state[3:6] - np.asarray(params.wind)
+        magnus_accel = dv[3:6] - np.array([0.0, 0.0, -params.gravity])
+        self.assertAlmostEqual(float(np.dot(magnus_accel, u)), 0.0, places=12)
+
     def test_launch_adds_robot_field_velocity(self):
         state = launch_state(
             position=(0, 0, 1),
@@ -26,6 +58,41 @@ class Physics3DTests(unittest.TestCase):
         )
         np.testing.assert_allclose(state[3:6], [11, 2, 5])
         np.testing.assert_allclose(state[6:], [0, -100, 0])
+
+
+    def test_rk4_fourth_order_convergence(self):
+        initial = launch_state((0, 0, 2), (12, 2, 8), (0, -120, 30))
+        params = FlightParameters(wind=(1, -0.5, 0))
+        reference = integrate_trajectory(initial, params, dt=0.0005, max_time=0.4, terminal_height=None)[-1].state
+        coarse = integrate_trajectory(initial, params, dt=0.04, max_time=0.4, terminal_height=None)[-1].state
+        medium = integrate_trajectory(initial, params, dt=0.02, max_time=0.4, terminal_height=None)[-1].state
+        fine = integrate_trajectory(initial, params, dt=0.01, max_time=0.4, terminal_height=None)[-1].state
+        e1 = np.linalg.norm(coarse - reference)
+        e2 = np.linalg.norm(medium - reference)
+        e3 = np.linalg.norm(fine - reference)
+        self.assertGreater(e1 / e2, 10.0)
+        self.assertGreater(e2 / e3, 10.0)
+
+    def test_max_time_is_exact_when_no_terminal_height(self):
+        samples = integrate_trajectory(
+            launch_state((0, 0, 2), (3, 0, 4), (0, 0, 0)),
+            self.vacuum, dt=0.03, max_time=0.2, terminal_height=None,
+        )
+        self.assertAlmostEqual(samples[-1].time, 0.2, places=12)
+
+    def test_crossing_direction_ignores_ascending_pass(self):
+        initial = launch_state((0, 0, 0.5), (2, 0, 5), (0, 0, 0))
+        descending = integrate_trajectory(
+            initial, self.vacuum, dt=0.02, max_time=2,
+            terminal_height=1.0, terminal_direction=-1,
+        )
+        self.assertLess(descending[-1].state[5], 0)
+        self.assertAlmostEqual(descending[-1].state[2], 1.0, places=10)
+
+    def test_rejects_bad_terminal_direction(self):
+        initial = launch_state((0, 0, 1), (1, 0, 0), (0, 0, 0))
+        with self.assertRaises(ValueError):
+            integrate_trajectory(initial, self.vacuum, terminal_direction=2)
 
     def test_gravity_only_rk4_matches_analytic_solution(self):
         initial = launch_state((0, 0, 2), (10, 3, 5), (0, 0, 0))
@@ -37,6 +104,32 @@ class Physics3DTests(unittest.TestCase):
             [4, 1.2, 2 + 5 * 0.4 - 0.5 * 9.81 * 0.4 ** 2],
             atol=1e-9
         )
+
+
+    def test_rk45_reduces_step_for_tighter_tolerance(self):
+        initial = launch_state((0, 0, 2), (12, 3, 8), (0, -100, 20))
+        params = FlightParameters(wind=(1, -0.5, 0))
+        loose = integrate_trajectory(initial, params, method="rk45", dt=0.2, max_step=0.2, max_time=0.5, terminal_height=None, rtol=1e-3, atol=1e-6)
+        tight = integrate_trajectory(initial, params, method="rk45", dt=0.2, max_step=0.2, max_time=0.5, terminal_height=None, rtol=1e-8, atol=1e-10)
+        self.assertGreater(len(tight), len(loose))
+
+    def test_rk45_hits_max_time_exactly(self):
+        initial = launch_state((0, 0, 2), (3, 0, 4), (0, 0, 0))
+        samples = integrate_trajectory(initial, self.vacuum, method="rk45", dt=0.03, max_time=0.2, terminal_height=None)
+        self.assertAlmostEqual(samples[-1].time, 0.2, places=12)
+
+    def test_rk45_raises_when_tolerance_cannot_be_met_at_min_step(self):
+        initial = launch_state((0, 0, 2), (40, 15, 25), (0, -800, 300))
+        params = FlightParameters(wind=(3, -2, 0))
+        with self.assertRaises(IntegrationError):
+            integrate_trajectory(initial, params, method="rk45", dt=0.2, min_step=0.2, max_step=0.2, max_time=0.2, rtol=1e-16, atol=1e-16, terminal_height=None)
+
+    def test_rk45_rejects_invalid_tolerances_and_step_bounds(self):
+        initial = launch_state((0, 0, 1), (1, 0, 1), (0, 0, 0))
+        with self.assertRaises(ValueError):
+            integrate_trajectory(initial, self.vacuum, method="rk45", rtol=0)
+        with self.assertRaises(ValueError):
+            integrate_trajectory(initial, self.vacuum, method="rk45", min_step=0.1, max_step=0.01)
 
     def test_rk45_matches_rk4_with_adaptive_steps(self):
         initial = launch_state((0, 0, 2), (12, 3, 8), (0, -100, 0))
@@ -75,7 +168,8 @@ class Physics3DTests(unittest.TestCase):
             enable_drag=False, enable_magnus=False, spin_decay_time_constant=2
         )
         initial = launch_state((0, 0, 2), (0, 0, 0), (0, -200, 0))
-        state = rk4_step(initial, params, 0.5)
+        state = rk4_step(initial, params, 0.25)
+        state = rk4_step(state, params, 0.25)
         self.assertAlmostEqual(state[7], -200 * math.exp(-0.25), delta=0.001)
 
     def test_ground_crossing_is_interpolated_and_terminated(self):

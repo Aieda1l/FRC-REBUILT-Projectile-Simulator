@@ -1,7 +1,7 @@
 # Milestone 2: RK4/RK45 3-D Projectile Engine Design
 
-**Date:** 2026-10-07  
-**Repository:** `Aieda1l/FRC-REBUILT-Projectile-Simulator`  
+**Date:** 2026-10-07
+**Repository:** `Aieda1l/FRC-REBUILT-Projectile-Simulator`
 **Branch:** `milestone-2-rk45-3d-engine`
 
 ## Purpose
