@@ -6,6 +6,13 @@ import Trajectory3DView from './Trajectory3DView.jsx';
 import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
 import {applyCalibrationProfile, parseCalibrationProfile} from './calibration.js';
 import AdvancedPhysicsPanel from './AdvancedPhysicsPanel.jsx';
+import GameProfilePanel from './GameProfilePanel.jsx';
+import {
+    DEFAULT_GAME_PROFILE,
+    applyGameProfile,
+    getGamePiece,
+    normalizeGamePiece,
+} from './gameProfiles.js';
 
 // Physics constants and utilities
 const DEG_TO_RAD = Math.PI / 180;
@@ -131,6 +138,7 @@ export default function TrajectorySimulator() {
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
     const [viewMode, setViewMode] = useState('2d');
+    const [activeGameProfile, setActiveGameProfile] = useState(DEFAULT_GAME_PROFILE);
 
     // Advanced calibrated physics
     const [robotVelocity, setRobotVelocity] = useState([0, 0, 0]);
@@ -164,21 +172,37 @@ export default function TrajectorySimulator() {
     const [velError, setVelError] = useState(0.5);
     const [angleError, setAngleError] = useState(1.0);
 
-    // Target geometry shared by scoring, 2-D rendering, and 3-D rendering.
-    const targetX = 0;
-    const targetY = HUB_DIMENSIONS.topZ;
-    const hubGeometry = useMemo(() => createHubGeometry({centerX: targetX, centerY: 0}), [targetX]);
+    const activeGamePiece = useMemo(() => (
+        typeof activeGameProfile.gamePiece === 'string'
+            ? getGamePiece(activeGameProfile.gamePiece)
+            : normalizeGamePiece(activeGameProfile.gamePiece)
+    ), [activeGameProfile]);
+    const scoringTarget = activeGameProfile.scoring;
+    const isHexHub = scoringTarget.kind === '2026-hex-hub';
+    const planeCenter = scoringTarget.apertureCenter ?? scoringTarget.planePoint ?? [0, 0, HUB_DIMENSIONS.topZ];
+    const targetX = scoringTarget.kind === 'plane-aperture'
+        ? Number(planeCenter[0] ?? 0)
+        : Number(scoringTarget.centerX ?? 0);
+    const targetY = isHexHub
+        ? HUB_DIMENSIONS.topZ
+        : scoringTarget.kind === 'top-circle'
+            ? Number(scoringTarget.height)
+            : Number(planeCenter[2] ?? HUB_DIMENSIONS.topZ);
+    const hubGeometry = useMemo(
+        () => isHexHub ? createHubGeometry({centerX: targetX, centerY: 0}) : null,
+        [isHexHub, targetX],
+    );
 
-    // Game piece (FUEL 2026)
-    // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
-    const mass = 0.215;
-    const diameter = 0.15;
-    const radius = diameter / 2;
-    // Aerodynamic coefficients are uncalibrated FUEL baselines, not measured constants.
-    const dragCoeff = 0.47;
-    const liftCoeff = 0.25;
+    const mass = activeGamePiece.mass;
+    const radius = activeGamePiece.radius;
+    const dragCoeff = activeGamePiece.dragCoeff;
+    const liftCoeff = activeGamePiece.liftCoeff;
     const airDensity = 1.204; // ~20 C, sea level; matches Python default environment
     const gravity = 9.81;
+
+    useEffect(() => {
+        if (!isHexHub && viewMode === '3d') setViewMode('2d');
+    }, [isHexHub, viewMode]);
 
     // Sync with Python backend
     const syncWithPython = async () => {
@@ -197,8 +221,8 @@ export default function TrajectorySimulator() {
         console.log("Python Result:", data);
     };
 
-    // Build params object. Calibration profiles only replace aerodynamic model fields.
-    const params = useMemo(() => applyCalibrationProfile({
+    // Game profiles set piece physics and scoring. Calibration profiles may then override aerodynamics.
+    const params = useMemo(() => applyCalibrationProfile(applyGameProfile({
         launchX, launchY, velocity, angleDeg: angle, azimuthDeg: azimuth, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
@@ -206,9 +230,10 @@ export default function TrajectorySimulator() {
         targetLateralY: 0,
         robotVelocity,
         wind,
-    }, calibrationProfile), [
+    }, activeGameProfile), calibrationProfile), [
         launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
-        targetX, robotVelocity, wind, calibrationProfile,
+        mass, radius, dragCoeff, liftCoeff, targetX, robotVelocity, wind,
+        activeGameProfile, calibrationProfile,
     ]);
 
     // Run simulation
@@ -228,16 +253,17 @@ export default function TrajectorySimulator() {
                 }
                 setOptimizerStatus(
                     Number.isFinite(optimization.solution.azimuth)
-                        ? `Clean entry found (azimuth ${optimization.solution.azimuth.toFixed(1)}°)`
-                        : 'Clean entry found'
+                        ? `Scoring shot found (azimuth ${optimization.solution.azimuth.toFixed(1)}°)`
+                        : 'Scoring shot found'
                 );
             } else if (optimization.reason === 'lateral-compensation-infeasible') {
                 setOptimizerStatus(
-                    'No clean entry: lateral robot velocity exceeds the available horizontal muzzle speed at this elevation. Try Best V + Angle.'
+                    'No scoring shot: lateral robot velocity exceeds the available horizontal muzzle speed at this elevation. Try Best V + Angle.'
                 );
             } else {
-                const near = optimization.bestNearMiss?.result?.hubInteraction?.classification;
-                setOptimizerStatus(near ? `No clean entry found (best: ${near})` : 'No clean entry found');
+                const near = optimization.bestNearMiss?.result?.scoringInteraction?.classification
+                    ?? optimization.bestNearMiss?.result?.hubInteraction?.classification;
+                setOptimizerStatus(near ? `No scoring shot found (best: ${near})` : 'No scoring shot found');
             }
         },
         onError: (message) => {
@@ -396,22 +422,53 @@ export default function TrajectorySimulator() {
         );
     }, [envelopeResults, toSVG]);
 
-    // Side-profile target visualization from the same HUB geometry used for scoring.
-    const targetVis = useMemo(() => ({
-        center: toSVG(targetX, hubGeometry.topZ),
-        topLeft: toSVG(targetX - hubGeometry.topApothem, hubGeometry.topZ),
-        topRight: toSVG(targetX + hubGeometry.topApothem, hubGeometry.topZ),
-        bottomLeft: toSVG(targetX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        bottomRight: toSVG(targetX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        topClearLeft: toSVG(targetX - Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        topClearRight: toSVG(targetX + Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        bottomClearLeft: toSVG(targetX - Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-        bottomClearRight: toSVG(targetX + Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-    }), [toSVG, targetX, hubGeometry, radius]);
+    // Side-profile target visualization follows the active scoring target.
+    const targetVis = useMemo(() => {
+        if (isHexHub && hubGeometry) {
+            return {
+                kind: 'hex-hub',
+                center: toSVG(targetX, hubGeometry.topZ),
+                topLeft: toSVG(targetX - hubGeometry.topApothem, hubGeometry.topZ),
+                topRight: toSVG(targetX + hubGeometry.topApothem, hubGeometry.topZ),
+                bottomLeft: toSVG(targetX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
+                bottomRight: toSVG(targetX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
+                topClearLeft: toSVG(targetX - Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
+                topClearRight: toSVG(targetX + Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
+                bottomClearLeft: toSVG(targetX - Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
+                bottomClearRight: toSVG(targetX + Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
+            };
+        }
+        if (scoringTarget.kind === 'top-circle') {
+            const openingRadius = Number(scoringTarget.openingRadius);
+            const clearRadius = Math.max(0, openingRadius - (activeGamePiece.collisionRadius ?? radius));
+            return {
+                kind: 'top-circle',
+                center: toSVG(targetX, targetY),
+                left: toSVG(targetX - openingRadius, targetY),
+                right: toSVG(targetX + openingRadius, targetY),
+                clearLeft: toSVG(targetX - clearRadius, targetY),
+                clearRight: toSVG(targetX + clearRadius, targetY),
+            };
+        }
+        const halfHeight = scoringTarget.shape === 'circle'
+            ? Number(scoringTarget.openingRadius)
+            : Number(scoringTarget.height) / 2;
+        const clearHalfHeight = Math.max(0, halfHeight - (activeGamePiece.collisionRadius ?? radius));
+        return {
+            kind: 'plane-aperture',
+            center: toSVG(targetX, targetY),
+            top: toSVG(targetX, targetY + halfHeight),
+            bottom: toSVG(targetX, targetY - halfHeight),
+            clearTop: toSVG(targetX, targetY + clearHalfHeight),
+            clearBottom: toSVG(targetX, targetY - clearHalfHeight),
+        };
+    }, [toSVG, targetX, targetY, isHexHub, hubGeometry, scoringTarget, activeGamePiece, radius]);
 
-    const hubClassification = result.hubInteraction?.classification ?? 'miss';
-    const hubStatus = HUB_STATUS_LABELS[hubClassification] ?? HUB_STATUS_LABELS.miss;
-    const cleanEntry = hubClassification === 'clean-entry';
+    const scoringInteraction = result.scoringInteraction ?? result.hubInteraction;
+    const scoreClassification = scoringInteraction?.classification ?? 'miss';
+    const hubStatus = HUB_STATUS_LABELS[scoreClassification]
+        ?? scoreClassification.replaceAll('-', ' ').toUpperCase();
+    const cleanEntry = Boolean(scoringInteraction?.isScore ?? result.hitTarget);
 
     const launchVis = useMemo(() => toSVG(launchX, launchY), [toSVG, launchX, launchY]);
     const impactVis = useMemo(() => result.impactPoint ? toSVG(result.impactPoint.x, result.impactPoint.y) : null, [toSVG, result]);
@@ -425,7 +482,7 @@ export default function TrajectorySimulator() {
                         FRC Trajectory Simulator
                     </h1>
                     <p className="text-slate-400 text-sm mt-1">
-                        2026 Season • Air Drag & Magnus Effect Physics
+                        {activeGameProfile.name} • Air Drag & Magnus Effect Physics
                     </p>
                 </div>
 
@@ -567,6 +624,11 @@ export default function TrajectorySimulator() {
                             )}
                         </div>
 
+                        <GameProfilePanel
+                            activeProfile={activeGameProfile}
+                            onActiveProfileChange={setActiveGameProfile}
+                        />
+
                         <AdvancedPhysicsPanel
                             aimAzimuth={azimuth}
                             onAimAzimuthChange={setAzimuth}
@@ -624,19 +686,21 @@ export default function TrajectorySimulator() {
                                 <div className="flex items-center gap-2">
                                     <div className="flex rounded-lg border border-slate-600 overflow-hidden" aria-label="Trajectory view">
                                         <button type="button" onClick={() => setViewMode('2d')} className={`px-3 py-1 text-xs ${viewMode === '2d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>2-D</button>
-                                        <button type="button" onClick={() => setViewMode('3d')} className={`px-3 py-1 text-xs ${viewMode === '3d' ? 'bg-indigo-500 text-white' : 'text-slate-300'}`}>3-D</button>
+                                        <button type="button" onClick={() => setViewMode('3d')} disabled={!isHexHub}
+                                            title={isHexHub ? 'Show 3-D view' : '3-D target rendering is currently available for the 2026 hex hub'}
+                                            className={`px-3 py-1 text-xs ${viewMode === '3d' ? 'bg-indigo-500 text-white' : 'text-slate-300'} ${!isHexHub ? 'cursor-not-allowed opacity-40' : ''}`}>3-D</button>
                                     </div>
                                     <span className={`px-3 py-1 rounded-full text-sm font-semibold ${cleanEntry ? 'bg-green-500/20 text-green-400 border border-green-500/50' : 'bg-red-500/20 text-red-400 border border-red-500/50'}`}>{hubStatus}</span>
                                 </div>
                             </div>
 
-                            {viewMode === '3d' ? (
+                            {viewMode === '3d' && hubGeometry ? (
                                 <Trajectory3DView
                                     samples={result.samples3d}
                                     idealSamples={showIdeal ? idealResult?.samples3d ?? [] : []}
                                     envelopeSamples={showEnvelope ? envelopeResults.map((entry) => entry.samples3d) : []}
                                     hubGeometry={hubGeometry}
-                                    interaction={result.hubInteraction}
+                                    interaction={scoringInteraction}
                                     ballRadius={radius}
                                 />
                             ) : (
@@ -649,20 +713,38 @@ export default function TrajectorySimulator() {
                                 </defs>
                                 <rect width="600" height="400" fill="url(#grid)"/>
 
-                                {/* Target funnel */}
-                                <path
-                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y} 
-                      L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
-                      L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
-                      L ${targetVis.topRight.x} ${targetVis.topRight.y}`}
-                                    fill="rgba(34, 197, 94, 0.1)"
-                                    stroke="#22c55e"
-                                    strokeWidth="3"
-                                />
-                                <line x1={targetVis.topClearLeft.x} y1={targetVis.topClearLeft.y} x2={targetVis.topClearRight.x} y2={targetVis.topClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
-                                <line x1={targetVis.bottomClearLeft.x} y1={targetVis.bottomClearLeft.y} x2={targetVis.bottomClearRight.x} y2={targetVis.bottomClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                {/* Active scoring target */}
+                                {targetVis.kind === 'hex-hub' ? (
+                                    <>
+                                        <path
+                                            d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y}
+                              L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
+                              L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
+                              L ${targetVis.topRight.x} ${targetVis.topRight.y}`}
+                                            fill="rgba(34, 197, 94, 0.1)"
+                                            stroke="#22c55e"
+                                            strokeWidth="3"
+                                        />
+                                        <line x1={targetVis.topClearLeft.x} y1={targetVis.topClearLeft.y} x2={targetVis.topClearRight.x} y2={targetVis.topClearRight.y}
+                                              stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                        <line x1={targetVis.bottomClearLeft.x} y1={targetVis.bottomClearLeft.y} x2={targetVis.bottomClearRight.x} y2={targetVis.bottomClearRight.y}
+                                              stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                    </>
+                                ) : targetVis.kind === 'top-circle' ? (
+                                    <>
+                                        <line x1={targetVis.left.x} y1={targetVis.left.y} x2={targetVis.right.x} y2={targetVis.right.y}
+                                              stroke="#22c55e" strokeWidth="4" />
+                                        <line x1={targetVis.clearLeft.x} y1={targetVis.clearLeft.y} x2={targetVis.clearRight.x} y2={targetVis.clearRight.y}
+                                              stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                    </>
+                                ) : (
+                                    <>
+                                        <line x1={targetVis.top.x} y1={targetVis.top.y} x2={targetVis.bottom.x} y2={targetVis.bottom.y}
+                                              stroke="#22c55e" strokeWidth="4" />
+                                        <line x1={targetVis.clearTop.x} y1={targetVis.clearTop.y} x2={targetVis.clearBottom.x} y2={targetVis.clearBottom.y}
+                                              stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                    </>
+                                )}
 
                                 {/* Error envelope */}
                                 {envelopePaths.map((path, i) => (
@@ -728,7 +810,7 @@ export default function TrajectorySimulator() {
                                 {/* Target label */}
                                 <text x={targetVis.center.x} y={targetVis.center.y - 30} fill="white" fontSize="12"
                                       textAnchor="middle" fontWeight="bold">
-                                    Hub
+                                    {activeGameProfile.name}
                                 </text>
                             </svg>
                             )}
@@ -750,7 +832,7 @@ export default function TrajectorySimulator() {
                                 </div>
                                 <div className="bg-slate-700/50 rounded p-2">
                                     <div className="text-slate-400">Game Piece</div>
-                                    <div className="text-cyan-400 font-mono">Fuel 2026</div>
+                                    <div className="text-cyan-400 font-mono">{activeGamePiece.name}</div>
                                 </div>
                             </div>
                         </div>
