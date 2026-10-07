@@ -60,6 +60,22 @@ export default function AdvancedPhysicsPanel({
             },
         });
     };
+    const setVectorSigma = (key, index, sigma) => {
+        const current = uncertaintyConfig[key] ?? [
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+        ];
+        const next = current.map((distribution, distributionIndex) => (
+            distributionIndex === index
+                ? {...distribution, sigma: Math.max(0, Number.isFinite(sigma) ? sigma : 0)}
+                : {...distribution}
+        ));
+        onUncertaintyConfigChange({
+            ...uncertaintyConfig,
+            [key]: next,
+        });
+    };
 
     const validationRms = calibrationProfile?.validation?.rms3d;
     const clampedFraction = calibrationDiagnostics?.clampedFraction ?? 0;
@@ -146,6 +162,12 @@ export default function AdvancedPhysicsPanel({
                                                  onChange={(value) => setSigma('spinRPM', value)} min={0} step={25} unit="RPM"/>
                                     <NumberField label="Mass σ" value={uncertaintyConfig.mass.sigma}
                                                  onChange={(value) => setSigma('mass', value)} min={0} step={0.001} unit="kg"/>
+                                    <NumberField label="Robot Forward σ" value={uncertaintyConfig.robotVelocity?.[0]?.sigma ?? 0}
+                                                 onChange={(value) => setVectorSigma('robotVelocity', 0, value)}
+                                                 min={0} step={0.05} unit="m/s"/>
+                                    <NumberField label="Robot Lateral σ" value={uncertaintyConfig.robotVelocity?.[1]?.sigma ?? 0}
+                                                 onChange={(value) => setVectorSigma('robotVelocity', 1, value)}
+                                                 min={0} step={0.05} unit="m/s"/>
                                     <NumberField label="Drag multiplier σ" value={uncertaintyConfig.dragMultiplier.sigma}
                                                  onChange={(value) => setSigma('dragMultiplier', value)} min={0} step={0.01}/>
                                     <NumberField label="Lift multiplier σ" value={uncertaintyConfig.liftMultiplier.sigma}

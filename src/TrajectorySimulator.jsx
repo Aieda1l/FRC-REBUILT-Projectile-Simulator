@@ -142,6 +142,11 @@ export default function TrajectorySimulator() {
         angleDeg: {kind: 'normal', mean: 0, sigma: 0.5},
         spinRPM: {kind: 'normal', mean: 0, sigma: 100},
         mass: {kind: 'normal', mean: 0, sigma: 0.004},
+        robotVelocity: [
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+            {kind: 'normal', mean: 0, sigma: 0},
+        ],
         dragMultiplier: {kind: 'normal', mean: 1, sigma: 0.05, min: 0},
         liftMultiplier: {kind: 'normal', mean: 1, sigma: 0.05, min: 0},
     });
