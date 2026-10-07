@@ -21,6 +21,12 @@ function interactionIsScore(interaction) {
   return interaction?.classification === 'clean-entry';
 }
 
+function interactionIsCollision(interaction) {
+  if (interaction?.status === 'collision') return true;
+  return interaction?.classification === 'rim-collision'
+    || interaction?.classification === 'funnel-collision';
+}
+
 function interactionRank(interaction) {
   if (Number.isFinite(interaction?.scoreRank)) return Number(interaction.scoreRank);
   if (interactionIsScore(interaction)) return 3;
@@ -79,7 +85,7 @@ export function rankCandidate(a, b, reference) {
   if (interactionIsScore(ia)) {
     const diff = (ib.clearanceMargin ?? -Infinity) - (ia.clearanceMargin ?? -Infinity);
     if (diff !== 0) return diff;
-  } else if (ia.status === 'collision') {
+  } else if (interactionIsCollision(ia)) {
     const diff = (ib.clearanceMargin ?? -Infinity) - (ia.clearanceMargin ?? -Infinity);
     if (diff !== 0) return diff;
   } else {
