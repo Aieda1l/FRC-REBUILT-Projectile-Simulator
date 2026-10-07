@@ -124,7 +124,7 @@ function normalizeResult(result, target, context) {
       : status === 'collision'
         ? 2
         : 1;
-  return {
+  const normalized = {
     method: target.kind,
     status,
     isScore,
@@ -136,12 +136,13 @@ function normalizeResult(result, target, context) {
     collisionPoint: null,
     geometry: null,
     ...result,
-    method: target.kind,
-    isScore,
-    status,
-    scoreRank,
-    points: isScore ? resolveScorePoints(target.points, context) : 0,
   };
+  normalized.method = target.kind;
+  normalized.isScore = isScore;
+  normalized.status = status;
+  normalized.scoreRank = scoreRank;
+  normalized.points = isScore ? resolveScorePoints(target.points, context) : 0;
+  return normalized;
 }
 
 function projectileRadius(piece) {
