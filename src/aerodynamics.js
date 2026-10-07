@@ -36,6 +36,13 @@ function coefficients(values, expectedLength, name = 'coefficients') {
   return values.map((value, index) => nonNegative(value, `${name}[${index}]`));
 }
 
+function signedCoefficients(values, expectedLength, name = 'coefficients') {
+  if (!Array.isArray(values) || values.length !== expectedLength) {
+    throw new RangeError(`${name} must contain exactly ${expectedLength} values`);
+  }
+  return values.map((value, index) => finite(value, `${name}[${index}]`));
+}
+
 export function reynoldsNumber({
   airDensity,
   speed,
@@ -71,6 +78,21 @@ export function normalizeDragModel(model, fallbackCoefficient) {
       coefficients: coefficients(input.coefficients, reynolds.length),
     };
   }
+  if (input.kind === 'table2d') {
+    const reynolds = axis(input.reynolds, 'reynolds');
+    const spinParameters = axis(input.spinParameters, 'spinParameters');
+    if (!Array.isArray(input.coefficients) || input.coefficients.length !== reynolds.length) {
+      throw new RangeError(`coefficients must contain exactly ${reynolds.length} rows`);
+    }
+    return {
+      kind: 'table2d',
+      reynolds,
+      spinParameters,
+      coefficients: input.coefficients.map((row, index) => (
+        signedCoefficients(row, spinParameters.length, `coefficients[${index}]`)
+      )),
+    };
+  }
   throw new RangeError(`unknown drag model kind: ${input.kind}`);
 }
 
@@ -89,7 +111,7 @@ export function normalizeLiftModel(model, fallbackCoefficient) {
     return {
       kind: 'table1d',
       spinParameters,
-      coefficients: coefficients(input.coefficients, spinParameters.length),
+      coefficients: signedCoefficients(input.coefficients, spinParameters.length),
     };
   }
   if (input.kind === 'table2d') {
@@ -139,10 +161,27 @@ function linear(values, outputs, query) {
   };
 }
 
-export function evaluateDragModel(model, reynolds) {
+export function evaluateDragModel(model, reynolds, spinParameterValue = 0) {
   if (model.kind === 'constant') return {coefficient: model.coefficient, clamped: false};
-  const out = linear(model.reynolds, model.coefficients, reynolds);
-  return {coefficient: out.value, clamped: out.clamped};
+  if (model.kind === 'table1d') {
+    const out = linear(model.reynolds, model.coefficients, reynolds);
+    return {coefficient: out.value, clamped: out.clamped};
+  }
+
+  const s = nonNegative(spinParameterValue, 'spinParameter');
+  const rb = bracket(model.reynolds, reynolds);
+  const sb = bracket(model.spinParameters, s);
+  const rowValue = (row) => {
+    if (sb.low === sb.high) return model.coefficients[row][sb.low];
+    const a = model.coefficients[row][sb.low];
+    const b = model.coefficients[row][sb.high];
+    return a + sb.fraction * (b - a);
+  };
+  const low = rowValue(rb.low);
+  const value = rb.low === rb.high
+    ? low
+    : low + rb.fraction * (rowValue(rb.high) - low);
+  return {coefficient: value, clamped: rb.clamped || sb.clamped};
 }
 
 export function evaluateLiftModel(model, reynolds, spinParameterValue) {

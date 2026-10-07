@@ -45,6 +45,16 @@ def _coefficients(values: Sequence[float], expected_length: int, name: str = "co
     return [_non_negative(value, f"{name}[{index}]") for index, value in enumerate(values)]
 
 
+def _signed_coefficients(
+    values: Sequence[float],
+    expected_length: int,
+    name: str = "coefficients",
+) -> list[float]:
+    if not isinstance(values, (list, tuple)) or len(values) != expected_length:
+        raise ValueError(f"{name} must contain exactly {expected_length} values")
+    return [_finite(value, f"{name}[{index}]") for index, value in enumerate(values)]
+
+
 def reynolds_number(*, air_density: float, speed: float, diameter: float,
                     dynamic_viscosity: float = DEFAULT_DYNAMIC_VISCOSITY) -> float:
     return (
@@ -77,6 +87,21 @@ def normalize_drag_model(model: Dict[str, Any] | None, fallback_coefficient: flo
             "reynolds": reynolds,
             "coefficients": _coefficients(source.get("coefficients"), len(reynolds)),
         }
+    if kind == "table2d":
+        reynolds = _axis(source.get("reynolds"), "reynolds")
+        spin_parameters = _axis(source.get("spinParameters"), "spinParameters")
+        matrix = source.get("coefficients")
+        if not isinstance(matrix, (list, tuple)) or len(matrix) != len(reynolds):
+            raise ValueError(f"coefficients must contain exactly {len(reynolds)} rows")
+        return {
+            "kind": kind,
+            "reynolds": reynolds,
+            "spinParameters": spin_parameters,
+            "coefficients": [
+                _coefficients(row, len(spin_parameters), f"coefficients[{index}]")
+                for index, row in enumerate(matrix)
+            ],
+        }
     raise ValueError(f"unknown drag model kind: {kind}")
 
 
@@ -99,7 +124,7 @@ def normalize_lift_model(model: Dict[str, Any] | None, fallback_coefficient: flo
         return {
             "kind": kind,
             "spinParameters": spin_parameters,
-            "coefficients": _coefficients(source.get("coefficients"), len(spin_parameters)),
+            "coefficients": _signed_coefficients(source.get("coefficients"), len(spin_parameters)),
         }
     if kind == "table2d":
         reynolds = _axis(source.get("reynolds"), "reynolds")
@@ -112,7 +137,7 @@ def normalize_lift_model(model: Dict[str, Any] | None, fallback_coefficient: flo
             "reynolds": reynolds,
             "spinParameters": spin_parameters,
             "coefficients": [
-                _coefficients(row, len(spin_parameters), f"coefficients[{index}]")
+                _signed_coefficients(row, len(spin_parameters), f"coefficients[{index}]")
                 for index, row in enumerate(matrix)
             ],
         }
@@ -144,11 +169,37 @@ def _linear(values: Sequence[float], outputs: Sequence[float], query: float) -> 
     return outputs[low] + fraction * (outputs[high] - outputs[low]), clamped
 
 
-def evaluate_drag_model(model: Dict[str, Any], reynolds: float) -> Dict[str, Any]:
+def evaluate_drag_model(
+    model: Dict[str, Any],
+    reynolds: float,
+    spin_parameter_value: float = 0.0,
+) -> Dict[str, Any]:
     if model["kind"] == "constant":
         return {"coefficient": model["coefficient"], "clamped": False}
-    value, clamped = _linear(model["reynolds"], model["coefficients"], reynolds)
-    return {"coefficient": value, "clamped": clamped}
+    if model["kind"] == "table1d":
+        value, clamped = _linear(model["reynolds"], model["coefficients"], reynolds)
+        return {"coefficient": value, "clamped": clamped}
+
+    spin_parameter_value = _non_negative(spin_parameter_value, "spin_parameter")
+    r_low, r_high, r_fraction, r_clamped = _bracket(model["reynolds"], reynolds)
+    s_low, s_high, s_fraction, s_clamped = _bracket(
+        model["spinParameters"], spin_parameter_value
+    )
+
+    def row_value(row: int) -> float:
+        if s_low == s_high:
+            return model["coefficients"][row][s_low]
+        a = model["coefficients"][row][s_low]
+        b = model["coefficients"][row][s_high]
+        return a + s_fraction * (b - a)
+
+    low_value = row_value(r_low)
+    value = (
+        low_value
+        if r_low == r_high
+        else low_value + r_fraction * (row_value(r_high) - low_value)
+    )
+    return {"coefficient": value, "clamped": r_clamped or s_clamped}
 
 
 def evaluate_lift_model(model: Dict[str, Any], reynolds: float, spin_parameter_value: float) -> Dict[str, Any]:
