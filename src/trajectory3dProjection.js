@@ -33,3 +33,37 @@ export function projectScene(points, camera, {width = 600, height = 400, padding
     bounds: {minX, maxX, minY, maxY},
   };
 }
+
+
+export function projectTrajectoryGroups(
+  {actual = [], ideal = [], envelopes = [], context = []},
+  camera,
+  options = {},
+) {
+  const world = [
+    ...context,
+    ...actual,
+    ...ideal,
+    ...envelopes.flat(),
+  ];
+  const projected = projectScene(world, camera, options);
+  let offset = 0;
+  const take = (count) => {
+    const chunk = projected.points.slice(offset, offset + count);
+    offset += count;
+    return chunk;
+  };
+
+  const projectedContext = take(context.length);
+  const projectedActual = take(actual.length);
+  const projectedIdeal = take(ideal.length);
+  const projectedEnvelopes = envelopes.map((trajectory) => take(trajectory.length));
+
+  return {
+    scale: projected.scale,
+    context: projectedContext,
+    actual: projectedActual,
+    ideal: projectedIdeal,
+    envelopes: projectedEnvelopes,
+  };
+}
