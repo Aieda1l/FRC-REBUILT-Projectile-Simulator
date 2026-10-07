@@ -1,3 +1,4 @@
+import math
 import unittest
 
 from api.calibration import (
@@ -165,6 +166,70 @@ class CalibrationFittingTests(unittest.TestCase):
             self.base,
         )
         self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
+
+
+    def test_validation_reports_entry_angle_and_clean_entry_confusion(self):
+        def hub_shot(shot_id, x_cross, observed_result):
+            launch_x, launch_z, vx = -3.0, 0.5, 2.0
+            top_z = 72.0 * 0.0254
+            crossing_time = (x_cross - launch_x) / vx
+            vz = (top_z - launch_z + 0.5 * 9.81 * crossing_time ** 2) / crossing_time
+            truth = FlightParameters(
+                **self.base,
+                drag_coefficient=0.0,
+                lift_coefficient=0.0,
+            )
+            initial = launch_state(
+                (launch_x, 0.0, launch_z),
+                (vx, 0.0, vz),
+                (0.0, 0.0, 0.0),
+            )
+            samples = integrate_trajectory(
+                initial,
+                truth,
+                dt=0.002,
+                max_time=1.8,
+                terminal_height=None,
+            )
+            shot = {
+                "id": shot_id,
+                "position": [launch_x, 0.0, launch_z],
+                "muzzleVelocity": [vx, 0.0, vz],
+                "spin": [0.0, 0.0, 0.0],
+                "robotVelocity": [0.0, 0.0, 0.0],
+                "wind": [0.0, 0.0, 0.0],
+                "targetX": 0.0,
+                "targetLateralY": 0.0,
+                "observedHubResult": observed_result,
+                "observations": [{
+                    "time": 1.8,
+                    "position": samples[-1].state[:3].tolist(),
+                }],
+            }
+            if observed_result == "clean-entry":
+                vertical_at_top = vz - 9.81 * crossing_time
+                shot["observedEntryAngle"] = math.degrees(math.atan2(vertical_at_top, vx))
+            return shot
+
+        profile = make_profile(
+            {"kind": "constant", "coefficient": 0.0},
+            {"kind": "table1d", "spinParameters": [0, 1], "coefficients": [0, 0]},
+        )
+        metrics = validate_profile(
+            [
+                hub_shot("clean", -0.30, "clean-entry"),
+                hub_shot("miss", 1.20, "miss"),
+            ],
+            profile,
+            self.base,
+        )
+        self.assertAlmostEqual(metrics["entryAngleRms"], 0.0, delta=0.05)
+        self.assertEqual(metrics["cleanEntryConfusion"], {
+            "truePositive": 1,
+            "trueNegative": 1,
+            "falsePositive": 0,
+            "falseNegative": 0,
+        })
 
     def test_spin_decay_is_not_inferred_without_spin_measurements(self):
         truth = FlightParameters(**self.base)
