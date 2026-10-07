@@ -3,7 +3,7 @@ name: Physics regression checks
 on:
   push:
     branches:
-      - milestone-1-physics-corrections
+      - master
   pull_request:
 
 jobs:
