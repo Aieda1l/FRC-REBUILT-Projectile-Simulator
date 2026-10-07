@@ -1,6 +1,14 @@
 import unittest
 
-from api.calibration import parse_calibration_profile
+from api.calibration import (
+    fit_drag_model,
+    fit_lift_model,
+    fit_spin_decay,
+    parse_calibration_profile,
+    split_shots,
+    validate_profile,
+)
+from api.physics3d import FlightParameters, integrate_trajectory, launch_state
 
 
 PROFILE = {
@@ -44,6 +52,133 @@ class CalibrationProfileTests(unittest.TestCase):
                     "reynolds": [200000, 50000],
                 },
             })
+
+
+def synthetic_shot(shot_id, speed, spin, params, duration=0.3):
+    initial = launch_state((0, 0, 1), (speed, 0, 4), (0, -spin, 0))
+    samples = integrate_trajectory(
+        initial,
+        params,
+        dt=0.002,
+        max_time=duration,
+        terminal_height=None,
+    )
+    observations = []
+    for time in (0.1, 0.2, 0.3):
+        index = round(time / 0.002)
+        observations.append({
+            "time": time,
+            "position": samples[index].state[:3].tolist(),
+        })
+    return {
+        "id": shot_id,
+        "position": [0, 0, 1],
+        "muzzleVelocity": [speed, 0, 4],
+        "spin": [0, -spin, 0],
+        "robotVelocity": [0, 0, 0],
+        "wind": [0, 0, 0],
+        "observations": observations,
+    }
+
+
+def make_profile(drag_model, lift_model):
+    return {
+        "schema": "frc-projectile-calibration-v1",
+        "name": "synthetic",
+        "gamePiece": {"diameter": 0.15, "massReference": 0.215},
+        "environment": {"dynamicViscosity": 1.81e-5},
+        "dragModel": drag_model,
+        "liftModel": lift_model,
+        "spinDecayTimeConstant": None,
+        "domain": {"reynolds": [0, 500000], "spinParameter": [0, 2]},
+        "validation": {},
+    }
+
+
+class CalibrationFittingTests(unittest.TestCase):
+    def setUp(self):
+        self.base = {
+            "mass": 0.215,
+            "radius": 0.075,
+            "air_density": 1.204,
+            "gravity": 9.81,
+            "dynamic_viscosity": 1.81e-5,
+        }
+
+    def test_split_is_deterministic_for_seed(self):
+        shots = [{"id": f"s{index}"} for index in range(12)]
+        a_train, a_validation = split_shots(shots, 0.25, 2026)
+        b_train, b_validation = split_shots(shots, 0.25, 2026)
+        self.assertEqual([shot["id"] for shot in a_train], [shot["id"] for shot in b_train])
+        self.assertEqual([shot["id"] for shot in a_validation], [shot["id"] for shot in b_validation])
+        self.assertFalse(
+            set(shot["id"] for shot in a_train)
+            & set(shot["id"] for shot in a_validation)
+        )
+
+    def test_constant_drag_fit_recovers_synthetic_coefficient(self):
+        truth = FlightParameters(
+            **self.base,
+            drag_coefficient=0.36,
+            lift_coefficient=0,
+            enable_magnus=False,
+        )
+        shots = [
+            synthetic_shot("d8", 8, 0, truth),
+            synthetic_shot("d12", 12, 0, truth),
+            synthetic_shot("d16", 16, 0, truth),
+        ]
+        fitted = fit_drag_model(shots, self.base, model_kind="constant")
+        self.assertEqual(fitted["kind"], "constant")
+        self.assertAlmostEqual(fitted["coefficient"], 0.36, delta=0.02)
+
+    def test_fitted_lift_reduces_held_out_position_error(self):
+        drag_model = {"kind": "constant", "coefficient": 0.36}
+        truth = FlightParameters(
+            **self.base,
+            drag_model=drag_model,
+            lift_model={
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [0, 0.28],
+            },
+        )
+        train = [
+            synthetic_shot("l1", 10, 50, truth),
+            synthetic_shot("l2", 11, 80, truth),
+            synthetic_shot("l3", 12, 110, truth),
+            synthetic_shot("l4", 13, 140, truth),
+        ]
+        held_out = [synthetic_shot("held", 11.5, 95, truth)]
+        fitted_lift = fit_lift_model(train, self.base, drag_model, model_kind="table1d")
+        fitted_metrics = validate_profile(
+            held_out,
+            make_profile(drag_model, fitted_lift),
+            self.base,
+        )
+        zero_metrics = validate_profile(
+            held_out,
+            make_profile(
+                drag_model,
+                {"kind": "table1d", "spinParameters": [0, 1], "coefficients": [0, 0]},
+            ),
+            self.base,
+        )
+        self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
+
+    def test_spin_decay_is_not_inferred_without_spin_measurements(self):
+        truth = FlightParameters(**self.base)
+        shots = [synthetic_shot("s1", 10, 100, truth)]
+        self.assertIsNone(fit_spin_decay(shots, self.base))
+
+    def test_table_drag_fit_rejects_insufficient_independent_data(self):
+        truth = FlightParameters(**self.base, drag_coefficient=0.4, enable_magnus=False)
+        shots = [
+            synthetic_shot("d1", 10, 0, truth),
+            synthetic_shot("d2", 11, 0, truth),
+        ]
+        with self.assertRaises(ValueError):
+            fit_drag_model(shots, self.base, model_kind="table1d")
 
 
 if __name__ == "__main__":
