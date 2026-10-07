@@ -258,11 +258,14 @@ def integrate_trajectory(
     atol: float = 1e-9,
     min_step: float = 1e-5,
     max_step: float = 0.05,
-    terminal_height: float = 0.0,
+    terminal_height: float | None = 0.0,
+    terminal_direction: int = -1,
 ) -> list[FlightSample]: ...
 ```
 
 Accepted methods are exactly `"rk4"` and `"rk45"`. Unknown methods raise `ValueError`.
+
+`terminal_direction` must be `-1` (descending), `0` (either direction), or `+1` (ascending). `terminal_height=None` disables height termination. Ground simulation uses height `0.0`, direction `-1`; target-entry simulation uses the target height, direction `-1`, so the initial ascending pass through HUB height is ignored.
 
 All public vector inputs must contain exactly three finite numeric values. State vectors must contain exactly nine finite numeric values. Mass and radius must be positive, density and gravity non-negative, and aerodynamic coefficients non-negative.
 
@@ -291,13 +294,13 @@ state_cross = state_A + alpha * (state_B - state_A)
 
 Ground `z=0` is a terminal descending crossing. The returned final sample must lie exactly on `z=0`.
 
-Target evaluation for the legacy UI uses the descending crossing of `z = target_height`. It checks the interpolated horizontal `(x,y)` center position against the current approximate opening-center clearance. Full hex-edge/rim/funnel contact is deferred.
+Target evaluation for the legacy UI uses the descending crossing of `z = target_height`. Let the target center in the horizontal plane be `(target_x, target_y)`; a hit requires `sqrt((x-target_x)^2 + (y-target_y)^2) <= entry_radius` at the interpolated crossing. The legacy 2-D adapter uses `target_y=0`, so this reduces to the existing one-axis clearance test. Full hex-edge/rim/funnel contact is deferred.
 
 ## Legacy Python Compatibility
 
 `api/trajectory_simulator.py` remains the public home of the existing 2-D dataclasses, optimizer, and helper functions during this milestone.
 
-Its `TrajectorySimulator.simulate()` must delegate the actual integration to `api.physics3d` through a 2-D adapter instead of maintaining a second integration implementation.
+Its `TrajectorySimulator.simulate()` must delegate the actual integration to `api.physics3d` through a 2-D adapter instead of maintaining a second integration implementation. The adapter copies mass/radius/aerodynamic properties from the configured game piece and copies air density/gravity from the configured `EnvironmentConditions`, so existing temperature/altitude configuration continues to affect the simulation.
 
 Mapping:
 
