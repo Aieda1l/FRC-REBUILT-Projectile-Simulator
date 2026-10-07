@@ -6,6 +6,7 @@ from calibration.fitting import (
     fit_lift_model,
     fit_spin_decay,
     parse_calibration_profile,
+    partition_shots_by_spin_parameter,
     split_shots,
     validate_profile,
     _flight_parameters_for_shot,
@@ -152,6 +153,47 @@ class CalibrationFittingTests(unittest.TestCase):
             & set(shot["id"] for shot in a_validation)
         )
 
+
+    def test_spin_partition_uses_dimensionless_spin_parameter(self):
+        low_s_high_raw_spin = {
+            "id": "low-s",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [100, 0, 0],
+            "spin": [0, -20, 0],
+        }
+        high_s_low_raw_spin = {
+            "id": "high-s",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [1, 0, 0],
+            "spin": [0, -10, 0],
+        }
+        drag, spinning = partition_shots_by_spin_parameter(
+            [low_s_high_raw_spin, high_s_low_raw_spin],
+            self.base,
+            0.05,
+        )
+        self.assertEqual([shot["id"] for shot in drag], ["low-s"])
+        self.assertEqual([shot["id"] for shot in spinning], ["high-s"])
+
+    def test_spin_partition_includes_threshold_boundary_and_rejects_invalid_threshold(self):
+        boundary = {
+            "id": "boundary",
+            "position": [0, 0, 1],
+            "muzzleVelocity": [10, 0, 0],
+            "spin": [0, -10, 0],
+        }
+        drag, spinning = partition_shots_by_spin_parameter(
+            [boundary],
+            self.base,
+            0.075,
+        )
+        self.assertEqual([shot["id"] for shot in drag], ["boundary"])
+        self.assertEqual(spinning, [])
+        for invalid in (-0.01, float("inf"), float("nan")):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    partition_shots_by_spin_parameter([boundary], self.base, invalid)
+
     def test_constant_drag_fit_recovers_synthetic_coefficient(self):
         truth = FlightParameters(
             **self.base,
@@ -202,6 +244,42 @@ class CalibrationFittingTests(unittest.TestCase):
         )
         self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
 
+
+
+    def test_lift_fit_can_recover_negative_coefficients(self):
+        drag_model = {"kind": "constant", "coefficient": 0.36}
+        truth = FlightParameters(
+            **self.base,
+            drag_model=drag_model,
+            lift_model={
+                "kind": "table1d",
+                "spinParameters": [0, 1],
+                "coefficients": [-0.2, -0.2],
+            },
+        )
+        train = [
+            synthetic_shot("n1", 10, 50, truth),
+            synthetic_shot("n2", 11, 80, truth),
+            synthetic_shot("n3", 12, 110, truth),
+            synthetic_shot("n4", 13, 140, truth),
+        ]
+        held_out = [synthetic_shot("negative-held", 11.5, 95, truth)]
+        fitted = fit_lift_model(train, self.base, drag_model, model_kind="table1d")
+        self.assertLess(min(fitted["coefficients"]), 0)
+        fitted_metrics = validate_profile(
+            held_out,
+            make_profile(drag_model, fitted),
+            self.base,
+        )
+        zero_metrics = validate_profile(
+            held_out,
+            make_profile(
+                drag_model,
+                {"kind": "table1d", "spinParameters": [0, 1], "coefficients": [0, 0]},
+            ),
+            self.base,
+        )
+        self.assertLess(fitted_metrics["rms3d"], zero_metrics["rms3d"])
 
     def test_validation_reports_entry_angle_and_clean_entry_confusion(self):
         def hub_shot(shot_id, x_cross, observed_result):
