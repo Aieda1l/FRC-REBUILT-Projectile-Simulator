@@ -54,6 +54,19 @@ For a circular opening, set `shape` to `circle` and provide `openingRadius` inst
 
 `planeNormal` controls which side of the plane is positive. `crossingDirection: -1` means the piece must move from the positive side to the negative side; `1` means the reverse; `0` accepts either crossing.
 
+## Create and save profiles in the browser UI
+
+Open **Game Piece & Scoring** in the controls column. The editor can create a game piece and pair it with one of the common built-in target types:
+
+- top circular hub/opening;
+- vertical rectangular opening;
+- vertical circular opening; or
+- the detailed 2026 REBUILT hex HUB.
+
+Enter the piece mass, diameter, optional conservative collision diameter, fallback drag/lift coefficients, target location/dimensions, and point value, then choose **Save & Activate Profile**. Saved profiles use the same `frc-shooting-game-v1` validation path as JSON profiles and are persisted in browser `localStorage`, so they remain available after a reload on that browser.
+
+The 2-D trajectory view renders the selected opening. The specialized 3-D funnel rendering remains enabled for the detailed 2026 hex HUB; custom openings use the 2-D target view so the UI does not display misleading 2026 geometry.
+
 ## Add a new game piece/profile without changing simulation code
 
 Game-profile JSON uses schema `frc-shooting-game-v1`:
