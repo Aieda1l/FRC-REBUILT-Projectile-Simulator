@@ -1,6 +1,6 @@
 import {simulateShot} from './trajectory2d.js';
 
-const CLASSIFICATIONS = ['clean-entry', 'rim-collision', 'funnel-collision', 'miss'];
+const LEGACY_HUB_CLASSIFICATIONS = ['clean-entry', 'rim-collision', 'funnel-collision', 'miss'];
 const UINT32 = 0x100000000;
 
 function finite(value, name) {
@@ -163,6 +163,15 @@ function summary(values) {
   };
 }
 
+function interactionOf(result) {
+  return result.scoringInteraction ?? result.hubInteraction;
+}
+
+function interactionIsScore(interaction) {
+  if (typeof interaction?.isScore === 'boolean') return interaction.isScore;
+  return interaction?.classification === 'clean-entry';
+}
+
 export function evaluateShotUncertainty(
   baseParams,
   uncertainty = {},
@@ -174,7 +183,11 @@ export function evaluateShotUncertainty(
   if (!Number.isFinite(dt) || dt <= 0) throw new RangeError('dt must be finite and positive');
 
   const rng = createSeededRng(seed);
-  const counts = Object.fromEntries(CLASSIFICATIONS.map((key) => [key, 0]));
+  const targetKind = baseParams.scoringTarget?.kind ?? '2026-hex-hub';
+  const counts = targetKind === '2026-hex-hub'
+    ? Object.fromEntries(LEGACY_HUB_CLASSIFICATIONS.map((key) => [key, 0]))
+    : {};
+  let scoreCount = 0;
   const clearances = [];
   const entryVelocities = [];
   const entryAngles = [];
@@ -182,10 +195,12 @@ export function evaluateShotUncertainty(
   for (let index = 0; index < sampleCount; index += 1) {
     const sampled = sampleShotParams(baseParams, uncertainty, rng);
     const result = simulateShot(sampled, {dt});
-    const classification = result.hubInteraction.classification;
-    counts[classification] += 1;
-    if (Number.isFinite(result.hubInteraction.clearanceMargin)) {
-      clearances.push(result.hubInteraction.clearanceMargin);
+    const interaction = interactionOf(result);
+    const classification = interaction.classification;
+    counts[classification] = (counts[classification] ?? 0) + 1;
+    if (interactionIsScore(interaction)) scoreCount += 1;
+    if (Number.isFinite(interaction.clearanceMargin)) {
+      clearances.push(interaction.clearanceMargin);
     }
     if (Number.isFinite(result.entryVelocity)) entryVelocities.push(result.entryVelocity);
     if (Number.isFinite(result.entryAngle)) entryAngles.push(result.entryAngle);
@@ -196,8 +211,10 @@ export function evaluateShotUncertainty(
     seed: Number(seed) >>> 0,
     counts,
     probabilities: Object.fromEntries(
-      CLASSIFICATIONS.map((key) => [key, counts[key] / sampleCount]),
+      Object.entries(counts).map(([key, count]) => [key, count / sampleCount]),
     ),
+    scoreCount,
+    scoreProbability: scoreCount / sampleCount,
     clearance: summary(clearances),
     entryVelocity: summary(entryVelocities),
     entryAngle: summary(entryAngles),
