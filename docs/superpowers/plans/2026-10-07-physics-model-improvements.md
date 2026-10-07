@@ -272,6 +272,7 @@ git commit -m "feat: add buoyancy and signed aerodynamic forces"
 - Modify: `api/main.py`
 - Modify: `api/uncertainty.py`
 - Modify if required by parity tests: `api/trajectory_simulator.py`
+- Modify: `calibration/fitting.py`
 - Modify: `tests/physics3d_js.test.mjs`
 - Modify: `tests/test_api.py`
 - Modify: `tests/uncertainty_js.test.mjs`
@@ -284,6 +285,7 @@ git commit -m "feat: add buoyancy and signed aerodynamic forces"
   - `simulateShot(params, options)` defaults `enableBuoyancy = true` and forwards it exactly once to flight parameters.
   - `Sim3DRequest.enable_buoyancy: bool = True`.
   - Python uncertainty construction maps browser-style `enableBuoyancy` to `FlightParameters.enable_buoyancy`.
+  - calibration `_base_kwargs(FlightParameters)` preserves an explicit `enable_buoyancy` value when reconstructing parameters.
   - uncertainty drag scaling supports `table2d` coefficient matrices.
   - signed lift scaling multiplies values without taking absolute value or otherwise changing sign.
 
@@ -300,7 +302,8 @@ Add tests proving:
 In JS and Python uncertainty tests:
 - create a `table2d` drag model and apply fixed `dragMultiplier: 2`; assert every matrix coefficient doubles;
 - create a signed lift table such as `[-0.2, 0.1]` and apply fixed `liftMultiplier: 0.5`; assert results are `[-0.1, 0.05]`, preserving sign;
-- assert sampled parameter dictionaries preserve any explicit `enableBuoyancy:false`.
+- assert sampled parameter dictionaries preserve any explicit `enableBuoyancy:false`;
+- add a calibration regression proving a `FlightParameters(enable_buoyancy=False)` base remains disabled when calibration constructs per-shot flight parameters.
 
 - [ ] **Step 3: Run focused tests and confirm failures**
 
@@ -334,7 +337,7 @@ In `api/uncertainty.py`, map:
 enable_buoyancy=params.get("enableBuoyancy", True)
 ```
 
-In any legacy-adapter constructor that explicitly reconstructs all physical toggles, forward the new field or rely on the canonical default only if no user-facing override exists. Preserve existing adapter parity tests.
+In `calibration/fitting.py`, add `enable_buoyancy` to `_base_kwargs()` when the source is a `FlightParameters` instance. In any legacy-adapter constructor that explicitly reconstructs all physical toggles, forward the new field or rely on the canonical default only if no user-facing override exists. Preserve existing adapter parity tests.
 
 - [ ] **Step 7: Extend uncertainty model scalers**
 
@@ -351,7 +354,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/trajectory2d.js src/uncertainty.js api/main.py api/uncertainty.py api/trajectory_simulator.py tests/physics3d_js.test.mjs tests/test_api.py tests/uncertainty_js.test.mjs tests/test_uncertainty.py tests/test_legacy_adapter.py
+git add src/trajectory2d.js src/uncertainty.js api/main.py api/uncertainty.py api/trajectory_simulator.py calibration/fitting.py tests/physics3d_js.test.mjs tests/test_api.py tests/uncertainty_js.test.mjs tests/test_uncertainty.py tests/test_legacy_adapter.py tests/test_calibration.py
 git commit -m "feat: propagate buoyancy through simulator interfaces"
 ```
 
