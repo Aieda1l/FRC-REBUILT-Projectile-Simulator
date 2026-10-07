@@ -1,8 +1,8 @@
 # FRC 2026 Projectile Trajectory Simulator
 
-A comprehensive web-based physics simulator for FIRST Robotics Competition (FRC) teams to calculate and optimize
-shooting trajectories. Features realistic effects including air resistance, Magnus effect (backspin), and interactive
-error analysis.
+A web-based physics simulator for FIRST Robotics Competition (FRC) teams to calculate and optimize shooting
+trajectories. It models gravity, quadratic air drag, backspin/Magnus lift, and interactive error analysis while keeping
+uncalibrated FUEL-specific aerodynamic assumptions explicit.
 
 ![React](https://img.shields.io/badge/React-18.0+-61DAFB.svg?logo=react&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.68+-009688.svg?logo=fastapi&logoColor=white)
@@ -11,13 +11,13 @@ error analysis.
 
 ## Features
 
-### Realistic Physics Modeling
+### Physics Modeling
 
-- **Gravitational acceleration**: Standard 9.81 m/s² with altitude correction.
-- **Quadratic air drag**: Realistic drag force using $C_d \times \frac{1}{2}\rho Av^2$.
-- **Magnus effect**: Lift from backspin using spin parameter models.
-- **Spin decay**: Models how spin rate decreases during flight due to air friction.
-- **Environment**: Adjust calculations based on air density (temperature/altitude).
+- **Gravitational acceleration**: Standard 9.81 m/s² with altitude correction in the Python engine.
+- **Quadratic air drag**: Standard $\frac{1}{2}\rho A C_d v^2$ force law.
+- **Magnus effect**: Backspin lift using the dimensionless spin parameter $S=\omega r/v$.
+- **Spin decay**: Disabled by default for FUEL until a measured decay time constant is available; the Python model accepts an optional calibrated value.
+- **Environment**: Air-density correction for temperature/altitude in Python; the browser default matches approximately 20°C at sea level.
 
 ### Interactive Web GUI
 
@@ -110,9 +110,23 @@ $$F_{drag} = -\frac{1}{2} \rho A C_d v^2 \hat{v}$$
 
 ### Magnus Effect
 
-The Magnus force from backspin creates upward lift:
-$$F_{magnus} = \frac{1}{2} \rho A C_l v^2 (\hat{\omega} \times \hat{v})$$
-*Where $C_l$ (Lift Coefficient) varies based on the spin parameter (surface speed vs. translational speed).*
+The Magnus force from backspin creates lift perpendicular to the velocity:
+$F_{magnus} = \frac{1}{2} \rho A C_l v^2 \hat{m}$
+
+The current 2-D baseline uses $S=|\omega|r/v$ and ramps $C_l$ linearly to the configured cap by $S=0.5$. The configured FUEL lift coefficient is applied exactly once.
+
+### Calibration Status
+
+The 2026 FUEL defaults are intentionally conservative rather than presented as measured constants:
+
+- Nominal mass is **0.215 kg**, the midpoint of the official ~0.203-0.227 kg range.
+- $C_d=0.47$ is an **uncalibrated sphere-like baseline**; real foam-ball drag can vary with Reynolds number, wear, and surface condition.
+- $C_l=0.25$ is an **uncalibrated lift cap** for the simple spin-parameter model.
+- FUEL spin decay is **off by default** because no FUEL-specific spin-down data is available.
+- HUB hit detection uses an approximate ball-center clearance at the 41.7 in across-flats opening; it is not yet a full 3-D hex/funnel collision model.
+- Flywheel-to-exit-speed/backspin calculations remain rough launcher estimates and should be replaced by measured exit conditions when possible.
+
+Reference background: [NASA sphere drag](https://www1.grc.nasa.gov/beginners-guide-to-aeronautics/drag-of-a-sphere/) and [FIRST 2026 season materials](https://www.firstinspires.org/resources/library/frc/season-materials).
 
 ## Python API Usage
 
