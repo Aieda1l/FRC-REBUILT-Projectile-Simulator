@@ -1,13 +1,13 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {hexVertices} from './hubGeometry.js';
-import {CAMERA_PRESETS, projectScene} from './trajectory3dProjection.js';
+import {CAMERA_PRESETS, projectTrajectoryGroups} from './trajectory3dProjection.js';
 
 const WIDTH = 600;
 const HEIGHT = 400;
 const PRESET_LABELS = {isometric: 'Isometric', front: 'Front', side: 'Side', top: 'Top'};
 const pointsAttribute = (points) => points.map((p) => `${p.x},${p.y}`).join(' ');
 
-export default function Trajectory3DView({samples, hubGeometry, interaction, ballRadius}) {
+export default function Trajectory3DView({samples, idealSamples = [], envelopeSamples = [], hubGeometry, interaction, ballRadius}) {
   const [preset, setPreset] = useState('isometric');
   const [camera, setCamera] = useState({...CAMERA_PRESETS.isometric});
   const [sampleIndex, setSampleIndex] = useState(Math.max(0, samples.length - 1));
@@ -26,23 +26,46 @@ export default function Trajectory3DView({samples, hubGeometry, interaction, bal
     const topClearance = hexVertices(Math.max(0.001, hubGeometry.topApothem - ballRadius), hubGeometry.topZ, hubGeometry.centerX, hubGeometry.centerY);
     const bottomClearance = hexVertices(Math.max(0.001, hubGeometry.bottomApothem - ballRadius), hubGeometry.bottomZ, hubGeometry.centerX, hubGeometry.centerY);
     const trajectory = samples.map((sample) => sample.state.slice(0, 3));
+    const ideal = idealSamples.map((sample) => sample.state.slice(0, 3));
+    const envelopes = envelopeSamples.map((group) => group.map((sample) => sample.state.slice(0, 3)));
     const axes = [
       [hubGeometry.centerX, hubGeometry.centerY, 0],
       [hubGeometry.centerX + 0.6, hubGeometry.centerY, 0],
       [hubGeometry.centerX, hubGeometry.centerY + 0.6, 0],
       [hubGeometry.centerX, hubGeometry.centerY, 0.6],
     ];
-    const world = [...hubGeometry.topVertices, ...hubGeometry.bottomVertices, ...topClearance, ...bottomClearance, ...trajectory, ...axes];
-    if (interaction?.collisionPoint) world.push(interaction.collisionPoint.state.slice(0, 3));
-    const projected = projectScene(world, camera, {width: WIDTH, height: HEIGHT, padding: 34}).points;
+    const collision = interaction?.collisionPoint?.state?.slice(0, 3) ?? null;
+    const context = [
+      ...hubGeometry.topVertices,
+      ...hubGeometry.bottomVertices,
+      ...topClearance,
+      ...bottomClearance,
+      ...axes,
+      ...(collision ? [collision] : []),
+    ];
+    const projected = projectTrajectoryGroups(
+      {context, actual: trajectory, ideal, envelopes},
+      camera,
+      {width: WIDTH, height: HEIGHT, padding: 34},
+    );
     let offset = 0;
-    const take = (count) => { const chunk = projected.slice(offset, offset + count); offset += count; return chunk; };
-    return {
-      top: take(6), bottom: take(6), topClearance: take(6), bottomClearance: take(6),
-      trajectory: take(trajectory.length), axes: take(4),
-      collision: interaction?.collisionPoint ? take(1)[0] : null,
+    const takeContext = (count) => {
+      const chunk = projected.context.slice(offset, offset + count);
+      offset += count;
+      return chunk;
     };
-  }, [samples, hubGeometry, interaction, ballRadius, camera]);
+    return {
+      top: takeContext(6),
+      bottom: takeContext(6),
+      topClearance: takeContext(6),
+      bottomClearance: takeContext(6),
+      axes: takeContext(4),
+      collision: collision ? takeContext(1)[0] : null,
+      trajectory: projected.actual,
+      ideal: projected.ideal,
+      envelopes: projected.envelopes,
+    };
+  }, [samples, idealSamples, envelopeSamples, hubGeometry, interaction, ballRadius, camera]);
 
   const marker = scene.trajectory[Math.min(sampleIndex, Math.max(0, scene.trajectory.length - 1))];
   const onPointerDown = (event) => {
@@ -84,6 +107,28 @@ export default function Trajectory3DView({samples, hubGeometry, interaction, bal
         <polygon points={pointsAttribute(scene.bottom)} fill="none" stroke="#22c55e" strokeWidth="2" />
         <polygon points={pointsAttribute(scene.topClearance)} fill="none" stroke="#67e8f9" strokeDasharray="5 4" />
         <polygon points={pointsAttribute(scene.bottomClearance)} fill="none" stroke="#67e8f9" strokeDasharray="5 4" opacity="0.65" />
+        {scene.envelopes.map((trajectory, index) => (
+          trajectory.length > 1 && (
+            <polyline
+              key={'envelope-' + index}
+              points={pointsAttribute(trajectory)}
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="1"
+              opacity="0.3"
+            />
+          )
+        ))}
+        {scene.ideal.length > 1 && (
+          <polyline
+            points={pointsAttribute(scene.ideal)}
+            fill="none"
+            stroke="#22d3ee"
+            strokeWidth="2"
+            strokeDasharray="8 4"
+            opacity="0.75"
+          />
+        )}
         {scene.trajectory.length > 1 && <polyline points={pointsAttribute(scene.trajectory)} fill="none" stroke="#818cf8" strokeWidth="3" strokeLinecap="round" />}
         {scene.axes.length === 4 && <>
           <line x1={scene.axes[0].x} y1={scene.axes[0].y} x2={scene.axes[1].x} y2={scene.axes[1].y} stroke="#ef4444" strokeWidth="2" />
