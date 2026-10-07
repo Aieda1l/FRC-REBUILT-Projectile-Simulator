@@ -72,7 +72,7 @@ export function simulateShot(params, options = {}) {
     wind,
     dragModel,
     liftModel,
-    spinDecayTimeConstant,
+    ...(spinDecayTimeConstant === undefined ? {} : {spinDecayTimeConstant}),
     ...(dynamicViscosity === undefined ? {} : {dynamicViscosity}),
     enableDrag,
     enableMagnus,
