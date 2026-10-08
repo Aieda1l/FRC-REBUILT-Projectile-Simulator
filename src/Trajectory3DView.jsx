@@ -169,8 +169,10 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
       <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
         <button type="button" className="border border-slate-600 rounded px-2 py-1"
           onClick={() => {
-            if (!playing && sampleIndex >= samples.length - 1) setSampleIndex(0);
-            setPlaying((value)=>!value);
+            if (sampleIndex >= samples.length - 1) {
+              setSampleIndex(0);
+              setPlaying(true);
+            } else setPlaying((value)=>!value);
           }}>{playing && sampleIndex < samples.length - 1 ? 'Pause playback' : 'Play trajectory'}</button>
         <label>Playback speed <select className="bg-slate-900 border border-slate-600 rounded p-1"
           value={speed} onChange={(event)=>setSpeed(Number(event.target.value))}>
