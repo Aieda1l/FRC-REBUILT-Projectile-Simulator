@@ -1,5 +1,5 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
-import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
+import {classifyTargetInteraction, createTargetGeometry} from './scoringTargets.js';
 import {summarizeCalibrationDomain} from './calibration.js';
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -52,6 +52,7 @@ export function simulateShot(params, options = {}) {
     enableBuoyancy = true,
     targetX = 0,
     targetLateralY = 0,
+    target = null,
     robotVelocity = [0, 0, 0],
     wind = [0, 0, 0],
   } = params;
@@ -103,11 +104,13 @@ export function simulateShot(params, options = {}) {
     ? summarizeCalibrationDomain(samples3d, flightParams, calibrationProfile)
     : null;
 
-  const hubGeometry = createHubGeometry({
-    centerX: targetX,
-    centerY: targetLateralY,
+  const hubGeometry = createTargetGeometry(target ?? {
+    kind: 'hub', name: '2026 REBUILT · HUB', id: 'hub-2026',
+    x: targetX, lateralY: targetLateralY,
+    z: 1.8288, topAcrossFlats: 41.727 * 0.0254,
+    bottomSide: 18.92 * 0.0254, panelHeight: 17.90 * 0.0254,
   });
-  const hubInteraction = classifyHubInteraction(samples3d, hubGeometry, radius);
+  const hubInteraction = classifyTargetInteraction(samples3d, hubGeometry, radius);
   const hitTarget = hubInteraction.classification === 'clean-entry';
 
   const final = samples3d.at(-1);
