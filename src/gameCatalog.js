@@ -1,3 +1,4 @@
+import {validatePolygonVertices} from './polygonGeometry.js';
 // Profiles describe shooter projectiles and simple scoring apertures in SI units.
 // Nominal historical dimensions are starting points, not calibrated flight models.
 export const GAME_PIECES = [
@@ -27,7 +28,7 @@ export const SCORING_TARGETS = [
 export const DEFAULT_PIECE_ID = 'fuel-2026';
 export const DEFAULT_TARGET_ID = 'hub-2026';
 export const STORAGE_KEY = 'frc-projectile-game-library-v1';
-export const TARGET_KINDS = ['hub', 'hoop', 'slot', 'round-slot'];
+export const TARGET_KINDS = ['hub', 'hoop', 'slot', 'round-slot', 'polygon'];
 export const PIECE_SHAPES = ['sphere', 'disc', 'ring'];
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
@@ -59,6 +60,14 @@ const position = (number, name) => {
 export function validatePiece(piece) {
   if (!piece || typeof piece !== 'object') throw new TypeError('Invalid game piece');
   if (!PIECE_SHAPES.includes(piece.shape)) throw new RangeError('Unsupported game piece shape');
+  if (piece.shape === 'ring' && (piece.innerDiameter ?? piece.diameter * 0.5) >= piece.diameter) {
+    throw new RangeError('Inner diameter must be smaller than the outer diameter');
+  }
+  if (piece.shape !== 'sphere' && (!Number.isFinite(piece.pitchDeg ?? 0)
+    || !Number.isFinite(piece.rollDeg ?? 0) || Math.abs(piece.pitchDeg ?? 0) > 89
+    || Math.abs(piece.rollDeg ?? 0) > 89)) {
+    throw new RangeError('Pitch and roll must be between -89 and 89 degrees');
+  }
   return {
     id: String(piece.id ?? ''),
     name: textField(piece.name),
@@ -67,6 +76,16 @@ export function validatePiece(piece) {
     diameter: positive(piece.diameter, 'Diameter', 10),
     dragCoeff: nonnegative(piece.dragCoeff, 'Drag coefficient'),
     liftCoeff: nonnegative(piece.liftCoeff, 'Lift coefficient'),
+    ...(piece.shape === 'sphere' ? {} : {
+      thickness: positive(piece.thickness ?? piece.diameter * 0.1, 'Thickness', 2),
+      ...(piece.shape === 'ring' ? {innerDiameter: nonnegative(piece.innerDiameter ?? piece.diameter * 0.5, 'Inner diameter')} : {}),
+      clAlpha: nonnegative(piece.clAlpha ?? 1.5, 'Lift slope'),
+      cdAlpha: nonnegative(piece.cdAlpha ?? 1.0, 'Drag slope'),
+      cmAlpha: nonnegative(piece.cmAlpha ?? 0.05, 'Pitch moment slope'),
+      angularDamping: nonnegative(piece.angularDamping ?? 0.01, 'Angular damping'),
+      pitchDeg: piece.pitchDeg ?? 0,
+      rollDeg: piece.rollDeg ?? 0,
+    }),
   };
 }
 
@@ -85,6 +104,12 @@ export function validateTarget(target) {
   };
   if (!Number.isInteger(common.points) || common.points < 0 || common.points > 1000) {
     throw new RangeError('Points must be an integer from 0 to 1000');
+  }
+  if (target.kind === 'polygon') {
+    if (!['vertical', 'horizontal'].includes(target.plane)) {
+      throw new RangeError('Custom opening plane must be vertical or horizontal');
+    }
+    return {...common, plane: target.plane, vertices: validatePolygonVertices(target.vertices)};
   }
   if (target.kind === 'hub') {
     const topAcrossFlats = positive(target.topAcrossFlats, 'Top across flats', 20);
