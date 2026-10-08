@@ -200,6 +200,7 @@ export default function TrajectorySimulator() {
     const params = useMemo(() => applyCalibrationProfile({
         launchX, launchY, velocity, angleDeg: angle, azimuthDeg: azimuth, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
+        gamePiece,
         enableDrag, enableMagnus,
         targetX,
         targetLateralY: scoringTarget.lateralY,
@@ -208,7 +209,7 @@ export default function TrajectorySimulator() {
         wind,
     }, calibrationProfile), [
         launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
-        targetX, scoringTarget, mass, radius, dragCoeff, liftCoeff,
+        targetX, scoringTarget, gamePiece, mass, radius, dragCoeff, liftCoeff,
         robotVelocity, wind, calibrationProfile,
     ]);
 
@@ -442,7 +443,7 @@ export default function TrajectorySimulator() {
                                     unit="m/s"/>
                             <Slider label="Angle" value={angle} onChange={setAngle} min={10} max={85} step={0.5}
                                     unit="°"/>
-                            <Slider label="Backspin" value={spinRPM} onChange={setSpinRPM} min={0} max={5000} step={100}
+                            <Slider label={gamePiece.shape === 'sphere' ? 'Backspin' : 'Axial spin'} value={spinRPM} onChange={setSpinRPM} min={0} max={5000} step={100}
                                     unit="RPM"/>
 
                             <button
