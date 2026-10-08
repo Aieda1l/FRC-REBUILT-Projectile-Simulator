@@ -1,5 +1,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {targetWireframes} from './scoringTargets.js';
+import {gamePieceWireframe} from './gamePieceGeometry.js';
 import {CAMERA_PRESETS, projectTrajectoryGroups} from './trajectory3dProjection.js';
 
 const WIDTH = 600;
@@ -7,7 +8,7 @@ const HEIGHT = 400;
 const PRESET_LABELS = {isometric: 'Isometric', front: 'Front', side: 'Side', top: 'Top'};
 const pointsAttribute = (points) => points.map((p) => `${p.x},${p.y}`).join(' ');
 
-export default function Trajectory3DView({samples, idealSamples = [], envelopeSamples = [], hubGeometry, interaction, ballRadius}) {
+export default function Trajectory3DView({samples, idealSamples = [], envelopeSamples = [], hubGeometry, interaction, ballRadius, gamePiece = {shape:'sphere', diameter:0.15}}) {
   const [preset, setPreset] = useState('isometric');
   const [camera, setCamera] = useState({...CAMERA_PRESETS.isometric});
   const [sampleIndex, setSampleIndex] = useState(Math.max(0, samples.length - 1));
@@ -36,10 +37,16 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
       [centerX, centerY, 0.6],
     ];
     const collision = interaction?.collisionPoint?.state?.slice(0, 3) ?? null;
+    const selectedSample = samples[Math.min(sampleIndex, Math.max(0, samples.length - 1))];
+    const piece = selectedSample
+      ? gamePieceWireframe(gamePiece, selectedSample.state.slice(0,3), selectedSample.orientation)
+      : {lines:[],points:[]};
     const context = [
       ...wires.frames.flat(),
       ...wires.clearance.flat(),
       ...wires.connectors.flat(),
+      ...piece.lines.flat(),
+      ...piece.points.flat(),
       ...axes,
       ...(collision ? [collision] : []),
     ];
@@ -58,13 +65,15 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
       frames: wires.frames.map((frame) => takeContext(frame.length)),
       clearances: wires.clearance.map((frame) => takeContext(frame.length)),
       connectors: wires.connectors.map((pair) => takeContext(pair.length)),
+      pieceLines: piece.lines.map((line) => takeContext(line.length)),
+      pieceEdges: piece.points.map((line) => takeContext(line.length)),
       axes: takeContext(4),
       collision: collision ? takeContext(1)[0] : null,
       trajectory: projected.actual,
       ideal: projected.ideal,
       envelopes: projected.envelopes,
     };
-  }, [samples, idealSamples, envelopeSamples, hubGeometry, interaction, ballRadius, camera]);
+  }, [samples, idealSamples, envelopeSamples, hubGeometry, interaction, ballRadius, camera, gamePiece, sampleIndex]);
 
   const marker = scene.trajectory[Math.min(sampleIndex, Math.max(0, scene.trajectory.length - 1))];
   const onPointerDown = (event) => {
@@ -134,12 +143,18 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
           <line x1={scene.axes[0].x} y1={scene.axes[0].y} x2={scene.axes[2].x} y2={scene.axes[2].y} stroke="#22c55e" strokeWidth="2" />
           <line x1={scene.axes[0].x} y1={scene.axes[0].y} x2={scene.axes[3].x} y2={scene.axes[3].y} stroke="#38bdf8" strokeWidth="2" />
         </>}
-        {marker && <circle cx={marker.x} cy={marker.y} r="7" fill="#f8fafc" stroke="#f97316" strokeWidth="3" />}
+        {scene.pieceLines.map((line,i) => <polygon key={'piece-outline-'+i}
+          points={pointsAttribute(line)} fill={i===0 ? 'rgba(251,191,36,0.10)' : 'none'}
+          stroke="#fbbf24" strokeWidth="1.8" strokeLinejoin="round"/>)}
+        {scene.pieceEdges.map((line,i) => <polyline key={'piece-edge-'+i}
+          points={pointsAttribute(line)} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>)}
+        {marker && <circle cx={marker.x} cy={marker.y} r="2" fill="#f8fafc" />}
         {scene.collision && <>
           <line x1={scene.collision.x-8} y1={scene.collision.y-8} x2={scene.collision.x+8} y2={scene.collision.y+8} stroke="#ef4444" strokeWidth="3" />
           <line x1={scene.collision.x-8} y1={scene.collision.y+8} x2={scene.collision.x+8} y2={scene.collision.y-8} stroke="#ef4444" strokeWidth="3" />
         </>}
       </svg>
+      <p className="text-xs text-amber-200">Amber outline = true-size {gamePiece.shape} · diameter {(gamePiece.diameter*100).toFixed(1)} cm · drag to orbit isometric view</p>
       <label className="block text-xs text-slate-400">
         Trajectory position
         <input aria-label="Trajectory position" type="range" min="0" max={Math.max(0, samples.length - 1)}
