@@ -788,7 +788,7 @@ export default function TrajectorySimulator() {
                                 </label>
                                 <div className="flex items-center gap-2 text-xs text-slate-300">
                                     <button type="button" className="border border-slate-600 rounded px-2 py-1"
-                                        onClick={()=>{if(!playbackRunning && playbackIndex>=result.samples3d.length-1)setPlaybackIndex(0);setPlaybackRunning(v=>!v);}}>
+                                        onClick={()=>{if(playbackIndex>=result.samples3d.length-1){setPlaybackIndex(0);setPlaybackRunning(true);}else setPlaybackRunning(v=>!v);}}>
                                         {playbackRunning && playbackIndex<result.samples3d.length-1 ? 'Pause playback' : 'Play trajectory'}
                                     </button>
                                     <label>Speed <select value={playbackSpeed}
