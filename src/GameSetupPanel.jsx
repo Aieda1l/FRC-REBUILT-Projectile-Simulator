@@ -83,6 +83,8 @@ function TargetEditor({draft, onChange, onSave, onCancel, isNew, disabled}) {
         <NumericField label="Lateral center (m)" value={draft.lateralY} onChange={(value) => update('lateralY', value)} />
         <NumericField label={draft.kind === 'hub' ? 'Top height (m)' : 'Opening center height (m)'}
           value={draft.z} min={0.001} onChange={(value) => update('z', value)} />
+        <NumericField label="Points per score" step={1} min={0} max={1000}
+          value={draft.points ?? 1} onChange={(value) => update('points', value)} />
         {draft.kind === 'hub' && <>
           <NumericField label="Top across flats (m)" min={0.001} value={draft.topAcrossFlats} onChange={(value) => update('topAcrossFlats', value)} />
           <NumericField label="Bottom hex side (m)" min={0.001} value={draft.bottomSide} onChange={(value) => update('bottomSide', value)} />
