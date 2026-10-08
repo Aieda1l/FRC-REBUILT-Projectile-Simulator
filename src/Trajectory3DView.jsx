@@ -12,11 +12,22 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
   const [preset, setPreset] = useState('isometric');
   const [camera, setCamera] = useState({...CAMERA_PRESETS.isometric});
   const [sampleIndex, setSampleIndex] = useState(Math.max(0, samples.length - 1));
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(0.25);
   const dragRef = useRef(null);
 
   useEffect(() => {
     setSampleIndex((i) => Math.min(i, Math.max(0, samples.length - 1)));
   }, [samples.length]);
+
+  useEffect(() => {
+    if (!playing) return;
+    if (sampleIndex >= samples.length - 1) return;
+    const dt = samples.length > 1 ? Math.max(1e-5, samples[1].time - samples[0].time) : 0.01;
+    const advance = Math.max(1,Math.round(0.033 * speed / dt));
+    const timer = setInterval(() => setSampleIndex((i)=>Math.min(samples.length - 1,i+advance)),33);
+    return () => clearInterval(timer);
+  }, [playing, speed, samples, sampleIndex]);
 
   const setCameraPreset = (name) => {
     setPreset(name);
@@ -155,6 +166,17 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
         </>}
       </svg>
       <p className="text-xs text-amber-200">Amber outline = true-size {gamePiece.shape} · diameter {(gamePiece.diameter*100).toFixed(1)} cm · drag to orbit isometric view</p>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+        <button type="button" className="border border-slate-600 rounded px-2 py-1"
+          onClick={() => {
+            if (!playing && sampleIndex >= samples.length - 1) setSampleIndex(0);
+            setPlaying((value)=>!value);
+          }}>{playing && sampleIndex < samples.length - 1 ? 'Pause playback' : 'Play trajectory'}</button>
+        <label>Playback speed <select className="bg-slate-900 border border-slate-600 rounded p-1"
+          value={speed} onChange={(event)=>setSpeed(Number(event.target.value))}>
+          {[0.25,0.5,1,2].map((value)=><option key={value} value={value}>{value}×</option>)}
+        </select></label>
+      </div>
       <label className="block text-xs text-slate-400">
         Trajectory position
         <input aria-label="Trajectory position" type="range" min="0" max={Math.max(0, samples.length - 1)}
