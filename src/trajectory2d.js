@@ -1,5 +1,7 @@
 import {integrateTrajectory, launchState} from './physics3d.js';
-import {classifyHubInteraction, createHubGeometry} from './hubGeometry.js';
+import {classifyTargetInteraction, createTargetGeometry} from './scoringTargets.js';
+import {createHubGeometry} from './hubGeometry.js';
+import {integrateRigidBodyFlight} from './rigidBodyFlight.js';
 import {summarizeCalibrationDomain} from './calibration.js';
 
 const DEG_TO_RAD = Math.PI / 180;
@@ -21,6 +23,7 @@ function projectSamples(samples) {
         vx: state[3],
         vy: state[5],
         speed: Math.hypot(state[3], state[4], state[5]),
+        normal: sample.normal ?? null,
       });
       lastBucket = bucket;
     }
@@ -52,6 +55,8 @@ export function simulateShot(params, options = {}) {
     enableBuoyancy = true,
     targetX = 0,
     targetLateralY = 0,
+    target = null,
+    gamePiece = null,
     robotVelocity = [0, 0, 0],
     wind = [0, 0, 0],
   } = params;
@@ -91,23 +96,32 @@ export function simulateShot(params, options = {}) {
     enableBuoyancy,
   };
 
-  const samples3d = integrateTrajectory(initial, flightParams, {
+  const selectedShape = gamePiece?.shape ?? 'sphere';
+  const samples3d = selectedShape === 'sphere'
+    ? integrateTrajectory(initial, flightParams, {
     method: options.method ?? 'rk4',
     dt: options.dt ?? 0.001,
     maxTime: options.maxTime ?? 5,
     terminalHeight: 0,
     terminalDirection: -1,
-  });
+  })
+    : integrateRigidBodyFlight(initial, {
+      ...flightParams, spinRPM, gamePiece,
+    }, {
+      dt: options.dt ?? 0.001,
+      maxTime: options.maxTime ?? 5,
+    });
 
-  const calibrationDiagnostics = calibrationProfile
+  const calibrationDiagnostics = calibrationProfile && selectedShape === 'sphere'
     ? summarizeCalibrationDomain(samples3d, flightParams, calibrationProfile)
     : null;
 
-  const hubGeometry = createHubGeometry({
-    centerX: targetX,
-    centerY: targetLateralY,
-  });
-  const hubInteraction = classifyHubInteraction(samples3d, hubGeometry, radius);
+  // Preserve the unrestricted legacy targetX API for existing consumers.
+  // New UI profiles are schema-validated before they reach the engine.
+  const hubGeometry = target
+    ? createTargetGeometry(target)
+    : {kind: 'hub', ...createHubGeometry({centerX: targetX, centerY: targetLateralY})};
+  const hubInteraction = classifyTargetInteraction(samples3d, hubGeometry, radius, gamePiece);
   const hitTarget = hubInteraction.classification === 'clean-entry';
 
   const final = samples3d.at(-1);

@@ -11,6 +11,19 @@ uncalibrated FUEL-specific aerodynamic assumptions explicit while supporting mea
 
 ## Features
 
+### Configurable FRC Games and Custom Openings
+
+The **Game Setup Library** supports historical FRC starter presets and independently saved game-piece and goal profiles. Use **New piece / New target**, or **Customize / Duplicate** an existing preset. Profiles and the active selection are saved to this browser's local storage (no account sync or shared cloud database).
+
+- **Pieces**: spherical balls, thin rigid discs, and annular rings with editable mass, outer diameter, air drag/lift coefficients, and for non-spherical pieces thickness, ring inner diameter, initial pitch/roll, aerodynamic slopes and angular damping.
+- **Scoring methods**: hexagonal 2026-style funnels, horizontal hoops, rectangular/circular vertical openings, and **drawn polygon openings** in a horizontal or vertical scoring plane. All target types have editable positions and simple points per successful shot. Drawn polygons support click-to-add points, drag-to-reshape, snap, exact local coordinates, deletion and saving. Self-intersecting and degenerate contours are rejected.
+- **Scoring**: trajectory plane-crossing and radius-aware clearance. For rigid discs and rings, the projected cylindrical envelope is used for orientation-sensitive clearance in planar holes; funnel geometry retains the conservative ball-radius method. A successful target crossing is not a full season-rule scoring determination.
+- **True-size views**: side-profile 2-D and rotatable 3-D wireframe outlines of the projectile at each shot sample, play/pause with variable playback speed, goal-crossing inspection, and edge clearance in centimeters.
+- **Disc/ring flight (experimental)**: the browser RK4 solver tracks translational motion plus attitude quaternion and angular velocity. It computes angle-of-attack-dependent lift/drag and an approximate pitching moment. The coefficients are placeholders, not FRC-measured aerodynamic data. Flexible foam-ring deformation, detailed rim impacts, wake effects and full rigid-body collision dynamics are **not** modeled. **Do not use this preliminary model as the sole basis for shooter design**.
+- The original **2026 FUEL and HUB configuration remains the default**; unchanged spherical profiles still use the existing calibrated-capable 3-D ball engine.
+
+To test: `npm run test:physics`, `npm run lint`, `npm run build`. Further design details and limitations are recorded in `docs/superpowers/specs/2026-10-07-custom-openings-shape-flight.md`.
+
 ### Physics Modeling
 
 - **Gravitational acceleration**: Standard configurable 9.81 m/s²; altitude and temperature adjust air density, not gravity.

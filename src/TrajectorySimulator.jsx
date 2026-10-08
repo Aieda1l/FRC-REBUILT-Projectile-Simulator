@@ -3,7 +3,10 @@ import {simulateTrajectory2D} from './trajectory2d.js';
 import Toggle from './Toggle.jsx';
 import {createOptimizerClient} from './optimizerClient.js';
 import Trajectory3DView from './Trajectory3DView.jsx';
-import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
+import GameSetupPanel from './GameSetupPanel.jsx';
+import {loadLibrary, resolveLibrarySelection} from './gameCatalog.js';
+import {createTargetGeometry, targetSideProfile} from './scoringTargets.js';
+import {gamePieceWireframe} from './gamePieceGeometry.js';
 import {applyCalibrationProfile, parseCalibrationProfile} from './calibration.js';
 import AdvancedPhysicsPanel from './AdvancedPhysicsPanel.jsx';
 
@@ -131,6 +134,9 @@ export default function TrajectorySimulator() {
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
     const [viewMode, setViewMode] = useState('2d');
+    const [playbackIndex, setPlaybackIndex] = useState(0);
+    const [playbackRunning, setPlaybackRunning] = useState(false);
+    const [playbackSpeed, setPlaybackSpeed] = useState(0.25);
 
     // Advanced calibrated physics
     const [robotVelocity, setRobotVelocity] = useState([0, 0, 0]);
@@ -164,19 +170,16 @@ export default function TrajectorySimulator() {
     const [velError, setVelError] = useState(0.5);
     const [angleError, setAngleError] = useState(1.0);
 
-    // Target geometry shared by scoring, 2-D rendering, and 3-D rendering.
-    const targetX = 0;
-    const targetY = HUB_DIMENSIONS.topZ;
-    const hubGeometry = useMemo(() => createHubGeometry({centerX: targetX, centerY: 0}), [targetX]);
-
-    // Game piece (FUEL 2026)
-    // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
-    const mass = 0.215;
-    const diameter = 0.15;
-    const radius = diameter / 2;
-    // Aerodynamic coefficients are uncalibrated FUEL baselines, not measured constants.
-    const dragCoeff = 0.47;
-    const liftCoeff = 0.25;
+    // All simulations, optimizer workers, and views consume the same active profiles.
+    const [gameSelection, setGameSelection] = useState(() => resolveLibrarySelection(loadLibrary()));
+    const {piece: gamePiece, target: scoringTarget} = gameSelection;
+    const targetX = scoringTarget.x;
+    const targetY = scoringTarget.z;
+    const hubGeometry = useMemo(() => createTargetGeometry(scoringTarget), [scoringTarget]);
+    const mass = gamePiece.mass;
+    const radius = gamePiece.diameter / 2;
+    const dragCoeff = gamePiece.dragCoeff;
+    const liftCoeff = gamePiece.liftCoeff;
     const airDensity = 1.204; // ~20 C, sea level; matches Python default environment
     const gravity = 9.81;
 
@@ -201,14 +204,17 @@ export default function TrajectorySimulator() {
     const params = useMemo(() => applyCalibrationProfile({
         launchX, launchY, velocity, angleDeg: angle, azimuthDeg: azimuth, spinRPM,
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
+        gamePiece,
         enableDrag, enableMagnus,
         targetX,
-        targetLateralY: 0,
+        targetLateralY: scoringTarget.lateralY,
+        target: scoringTarget,
         robotVelocity,
         wind,
     }, calibrationProfile), [
         launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
-        targetX, robotVelocity, wind, calibrationProfile,
+        targetX, scoringTarget, gamePiece, mass, radius, dragCoeff, liftCoeff,
+        robotVelocity, wind, calibrationProfile,
     ]);
 
     // Run simulation
@@ -279,7 +285,7 @@ export default function TrajectorySimulator() {
     // Ideal angle calculation
     const idealAngle = useMemo(() =>
             computeIdealAngle(launchX, launchY, targetX, targetY, velocity, gravity),
-        [launchX, launchY, velocity]
+        [launchX, launchY, targetX, targetY, velocity]
     );
 
     // Estimated backspin from flywheel params
@@ -346,12 +352,12 @@ export default function TrajectorySimulator() {
         const allX = result.points.map(p => p.x);
         const allY = result.points.map(p => p.y);
         return {
-            xMin: Math.min(launchX - 0.5, ...allX),
-            xMax: Math.max(1.5, ...allX) + 0.5,
+            xMin: Math.min(launchX - 0.5, targetX - 1.5, ...allX),
+            xMax: Math.max(1.5, targetX + 1.5, ...allX) + 0.5,
             yMin: -0.2,
             yMax: Math.max(targetY + 1, result.maxHeight + 0.5)
         };
-    }, [result, launchX, targetY]);
+    }, [result, launchX, targetX, targetY]);
 
     // Convert coordinates to SVG
     const toSVG = useCallback((x, y) => {
@@ -396,18 +402,48 @@ export default function TrajectorySimulator() {
         );
     }, [envelopeResults, toSVG]);
 
-    // Side-profile target visualization from the same HUB geometry used for scoring.
-    const targetVis = useMemo(() => ({
-        center: toSVG(targetX, hubGeometry.topZ),
-        topLeft: toSVG(targetX - hubGeometry.topApothem, hubGeometry.topZ),
-        topRight: toSVG(targetX + hubGeometry.topApothem, hubGeometry.topZ),
-        bottomLeft: toSVG(targetX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        bottomRight: toSVG(targetX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        topClearLeft: toSVG(targetX - Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        topClearRight: toSVG(targetX + Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        bottomClearLeft: toSVG(targetX - Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-        bottomClearRight: toSVG(targetX + Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-    }), [toSVG, targetX, hubGeometry, radius]);
+    // Side-profile drawing uses the same geometry object as scoring.
+    const targetVis = useMemo(() => {
+        const side = targetSideProfile(hubGeometry, radius);
+        return {
+            center: toSVG(...side.labelPoint),
+            polygon: side.polygon.map((point) => toSVG(...point)),
+            clearances: side.clearances.map((line) => line.map((point) => toSVG(...point))),
+        };
+    }, [toSVG, hubGeometry, radius]);
+
+    useEffect(() => {
+        if (!playbackRunning || viewMode !== '2d' || playbackIndex >= result.samples3d.length-1) return;
+        const dt = result.samples3d.length > 1
+            ? Math.max(1e-5, result.samples3d[1].time - result.samples3d[0].time) : 0.01;
+        const advance = Math.max(1, Math.round(0.033 * playbackSpeed / dt));
+        const timer = setInterval(() => setPlaybackIndex((i)=>Math.min(result.samples3d.length-1,i+advance)),33);
+        return () => clearInterval(timer);
+    }, [playbackRunning, playbackSpeed, playbackIndex, result.samples3d, viewMode]);
+
+    const activeSample = result.samples3d[Math.min(playbackIndex, result.samples3d.length - 1)];
+    const pieceVis = useMemo(() => {
+        if (!activeSample) return {lines: [], points: []};
+        const wire = gamePieceWireframe(gamePiece, activeSample.state.slice(0, 3), activeSample.orientation);
+        return {
+            lines: wire.lines.map((line) => line.map(([x,,z]) => toSVG(x,z))),
+            points: wire.points.map((line) => line.map(([x,,z]) => toSVG(x,z))),
+        };
+    }, [activeSample, gamePiece, toSVG]);
+    const centerNearTarget = () => {
+        const crossing = result.hubInteraction?.topCrossing;
+        if (!crossing) return;
+        let nearest=0, delta=Infinity;
+        result.samples3d.forEach((sample,index)=>{
+            const d=Math.abs(sample.time-crossing.time);
+            if (d<delta) {delta=d; nearest=index;}
+        });
+        setPlaybackIndex(nearest);
+    };
+    const clearance = result.hubInteraction?.clearanceMargin;
+    const clearanceLabel = Number.isFinite(clearance)
+        ? `${clearance >= 0 ? '+' : ''}${(clearance * 100).toFixed(1)} cm`
+        : 'N/A';
 
     const hubClassification = result.hubInteraction?.classification ?? 'miss';
     const hubStatus = HUB_STATUS_LABELS[hubClassification] ?? HUB_STATUS_LABELS.miss;
@@ -425,13 +461,14 @@ export default function TrajectorySimulator() {
                         FRC Trajectory Simulator
                     </h1>
                     <p className="text-slate-400 text-sm mt-1">
-                        2026 Season • Air Drag & Magnus Effect Physics
+                        Configurable FRC game pieces, targets • Air Drag & Magnus Effect Physics
                     </p>
                 </div>
 
                 <div className="grid lg:grid-cols-3 gap-4">
                     {/* Controls Panel */}
                     <div className="lg:col-span-1 space-y-4">
+                        <GameSetupPanel onSelectionChange={setGameSelection} disabled={optimizerRunning} />
                         {/* Launch Parameters */}
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
                             <h2 className="text-lg font-semibold text-indigo-400 mb-3">Launch Parameters</h2>
@@ -443,7 +480,7 @@ export default function TrajectorySimulator() {
                                     unit="m/s"/>
                             <Slider label="Angle" value={angle} onChange={setAngle} min={10} max={85} step={0.5}
                                     unit="°"/>
-                            <Slider label="Backspin" value={spinRPM} onChange={setSpinRPM} min={0} max={5000} step={100}
+                            <Slider label={gamePiece.shape === 'sphere' ? 'Backspin' : 'Axial spin'} value={spinRPM} onChange={setSpinRPM} min={0} max={5000} step={100}
                                     unit="RPM"/>
 
                             <button
@@ -599,6 +636,9 @@ export default function TrajectorySimulator() {
                                 unit=""
                                 highlight={result.hitTarget}
                             />
+                            <ResultItem label="Target" value={scoringTarget.name} unit="" />
+                            <ResultItem label="Shot points" value={result.hitTarget ? scoringTarget.points ?? 1 : 0} unit="" highlight={result.hitTarget} />
+                            <ResultItem label="Game piece" value={gamePiece.name} unit="" />
                             <ResultItem label="Flight Time" value={result.flightTime.toFixed(3)} unit="s"/>
                             <ResultItem label="Max Height" value={result.maxHeight.toFixed(2)} unit="m"/>
                             <ResultItem label="Range" value={result.range.toFixed(2)} unit="m"/>
@@ -638,6 +678,7 @@ export default function TrajectorySimulator() {
                                     hubGeometry={hubGeometry}
                                     interaction={result.hubInteraction}
                                     ballRadius={radius}
+                                    gamePiece={gamePiece}
                                 />
                             ) : (
                             <svg viewBox="0 0 600 400" className="w-full h-auto bg-slate-900/50 rounded-lg">
@@ -649,20 +690,14 @@ export default function TrajectorySimulator() {
                                 </defs>
                                 <rect width="600" height="400" fill="url(#grid)"/>
 
-                                {/* Target funnel */}
-                                <path
-                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y} 
-                      L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
-                      L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
-                      L ${targetVis.topRight.x} ${targetVis.topRight.y}`}
-                                    fill="rgba(34, 197, 94, 0.1)"
-                                    stroke="#22c55e"
-                                    strokeWidth="3"
-                                />
-                                <line x1={targetVis.topClearLeft.x} y1={targetVis.topClearLeft.y} x2={targetVis.topClearRight.x} y2={targetVis.topClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
-                                <line x1={targetVis.bottomClearLeft.x} y1={targetVis.bottomClearLeft.y} x2={targetVis.bottomClearRight.x} y2={targetVis.bottomClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                {/* Target aperture side profile */}
+                                <polyline points={targetVis.polygon.map((p) => p.x + ',' + p.y).join(' ')}
+                                          fill="none" stroke="#22c55e" strokeWidth="3"/>
+                                {targetVis.clearances.map((line, index) => (
+                                    <polyline key={'target-clearance-' + index}
+                                              points={line.map((p) => p.x + ',' + p.y).join(' ')}
+                                              fill="none" stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5"/>
+                                ))}
 
                                 {/* Error envelope */}
                                 {envelopePaths.map((path, i) => (
@@ -677,6 +712,17 @@ export default function TrajectorySimulator() {
 
                                 {/* Main trajectory */}
                                 <path d={trajectoryPath} fill="none" stroke="#818cf8" strokeWidth="3"/>
+
+                                {/* Game-piece outline at selected trajectory sample, scaled in meters */}
+                                {pieceVis.lines.map((line,i) => (
+                                    <polygon key={'piece-line-'+i} points={line.map(p=>p.x+','+p.y).join(' ')}
+                                             stroke="#fbbf24" strokeWidth="1.8"
+                                             fill={i===0 ? 'rgba(251,191,36,0.12)' : 'none'}/>
+                                ))}
+                                {pieceVis.points.map((line,i) => (
+                                    <polyline key={'piece-edge-'+i} points={line.map(p=>p.x+','+p.y).join(' ')}
+                                              fill="none" stroke="#f59e0b" strokeWidth="1.3"/>
+                                ))}
 
                                 {/* Launch point */}
                                 <circle cx={launchVis.x} cy={launchVis.y} r="8" fill="#ef4444" stroke="white"
@@ -728,10 +774,38 @@ export default function TrajectorySimulator() {
                                 {/* Target label */}
                                 <text x={targetVis.center.x} y={targetVis.center.y - 30} fill="white" fontSize="12"
                                       textAnchor="middle" fontWeight="bold">
-                                    Hub
+                                    {scoringTarget.name}
                                 </text>
                             </svg>
                             )}
+
+                            {viewMode === '2d' && <div className="mt-3 space-y-2">
+                                <label className="block text-xs text-slate-400">
+                                    Game-piece position along trajectory
+                                    <input type="range" className="w-full mt-1 accent-amber-400" min="0"
+                                        max={Math.max(0,result.samples3d.length-1)} value={Math.min(playbackIndex,result.samples3d.length-1)}
+                                        onChange={(event)=>setPlaybackIndex(Number(event.target.value))}/>
+                                </label>
+                                <div className="flex items-center gap-2 text-xs text-slate-300">
+                                    <button type="button" className="border border-slate-600 rounded px-2 py-1"
+                                        onClick={()=>{if(playbackIndex>=result.samples3d.length-1){setPlaybackIndex(0);setPlaybackRunning(true);}else setPlaybackRunning(v=>!v);}}>
+                                        {playbackRunning && playbackIndex<result.samples3d.length-1 ? 'Pause playback' : 'Play trajectory'}
+                                    </button>
+                                    <label>Speed <select value={playbackSpeed}
+                                        className="bg-slate-900 border border-slate-600 rounded p-1"
+                                        onChange={(event)=>setPlaybackSpeed(Number(event.target.value))}>
+                                        {[0.25,0.5,1,2].map(v=><option key={v} value={v}>{v}×</option>)}
+                                    </select></label>
+                                </div>
+                            </div>}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                                <button type="button" className="border border-slate-600 px-2 py-1 rounded hover:border-cyan-400"
+                                    onClick={centerNearTarget} disabled={!result.hubInteraction?.topCrossing}>
+                                    Inspect goal crossing
+                                </button>
+                                <span>Edge clearance: <strong className={clearance >= 0 ? 'text-green-300' : 'text-amber-300'}>{clearanceLabel}</strong></span>
+                                <span className="text-amber-200">Amber = actual-size {gamePiece.shape} ({(gamePiece.diameter*100).toFixed(1)} cm)</span>
+                            </div>
 
                             {/* Info bar */}
                             <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
@@ -750,7 +824,7 @@ export default function TrajectorySimulator() {
                                 </div>
                                 <div className="bg-slate-700/50 rounded p-2">
                                     <div className="text-slate-400">Game Piece</div>
-                                    <div className="text-cyan-400 font-mono">Fuel 2026</div>
+                                    <div className="text-cyan-400 font-mono">{gamePiece.name}</div>
                                 </div>
                             </div>
                         </div>
