@@ -22,12 +22,18 @@ export function hexVertices(apothem, z, centerX = 0, centerY = 0) {
   });
 }
 
-export function createHubGeometry({centerX = 0, centerY = 0} = {}) {
-  const topApothem = HUB_DIMENSIONS.topAcrossFlats / 2;
-  const bottomAcrossFlats = SQRT3 * HUB_DIMENSIONS.bottomSide;
+export function createHubGeometry({
+  centerX = 0,
+  centerY = 0,
+  topZ = HUB_DIMENSIONS.topZ,
+  topAcrossFlats = HUB_DIMENSIONS.topAcrossFlats,
+  bottomSide = HUB_DIMENSIONS.bottomSide,
+  panelHeight = HUB_DIMENSIONS.panelHeight,
+} = {}) {
+  const topApothem = topAcrossFlats / 2;
+  const bottomAcrossFlats = SQRT3 * bottomSide;
   const bottomApothem = bottomAcrossFlats / 2;
-  const topZ = HUB_DIMENSIONS.topZ;
-  const bottomZ = topZ - HUB_DIMENSIONS.panelHeight;
+  const bottomZ = topZ - panelHeight;
   const slope = (topApothem - bottomApothem) / (topZ - bottomZ);
   const normals = Array.from({length: 6}, (_, index) => {
     const angle = index * Math.PI / 3;
