@@ -11,17 +11,17 @@ export const GAME_PIECES = [
 ];
 
 export const SCORING_TARGETS = [
-  {id: 'hub-2026', name: '2026 REBUILT · HUB', kind: 'hub', x: 0, lateralY: 0, z: 1.8288, topAcrossFlats: 41.727 * 0.0254, bottomSide: 18.92 * 0.0254, panelHeight: 17.90 * 0.0254},
-  {id: 'upper-hub-2022', name: '2022 RAPID REACT · upper hub (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 2.6416, diameter: 1.2192},
-  {id: 'lower-hub-2022', name: '2022 RAPID REACT · lower hub (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 1.0414, diameter: 1.5272},
-  {id: 'upper-boiler-2017', name: '2017 STEAMWORKS · upper boiler (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 2.4638, diameter: 0.5461},
-  {id: 'low-boiler-2017', name: '2017 STEAMWORKS · low boiler', kind: 'slot', x: 0, lateralY: 0, z: 0.5683, width: 0.635, height: 0.22225},
-  {id: 'bottom-port-2020', name: '2020 INFINITE RECHARGE · bottom port', kind: 'slot', x: 0, lateralY: 0, z: 0.5842, width: 0.8636, height: 0.254},
-  {id: 'inner-port-2020', name: '2020 INFINITE RECHARGE · inner port', kind: 'round-slot', x: 0, lateralY: 0, z: 2.49555, diameter: 0.3302},
-  {id: 'high-goal-2013', name: '2013 ULTIMATE ASCENT · high disc slot', kind: 'slot', x: 0, lateralY: 0, z: 2.797, width: 1.3716, height: 0.3048},
-  {id: 'hoop-2012', name: '2012 REBOUND RUMBLE · basket (approx.)', kind: 'hoop', x: 0, lateralY: 0, z: 2.4, diameter: 0.4572},
-  {id: 'speaker-2024', name: '2024 CRESCENDO · SPEAKER (approx.)', kind: 'slot', x: 0, lateralY: 0, z: 2.0, width: 1.05, height: 0.45},
-  {id: 'amp-2024', name: '2024 CRESCENDO · AMP (approx.)', kind: 'slot', x: 0, lateralY: 0, z: 1.2, width: 0.52, height: 0.26},
+  {id: 'hub-2026', points: 1, name: '2026 REBUILT · HUB', kind: 'hub', x: 0, lateralY: 0, z: 1.8288, topAcrossFlats: 41.727 * 0.0254, bottomSide: 18.92 * 0.0254, panelHeight: 17.90 * 0.0254},
+  {id: 'upper-hub-2022', points: 2, name: '2022 RAPID REACT · upper hub (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 2.6416, diameter: 1.2192},
+  {id: 'lower-hub-2022', points: 1, name: '2022 RAPID REACT · lower hub (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 1.0414, diameter: 1.5272},
+  {id: 'upper-boiler-2017', points: 1, name: '2017 STEAMWORKS · upper boiler (opening)', kind: 'hoop', x: 0, lateralY: 0, z: 2.4638, diameter: 0.5461},
+  {id: 'low-boiler-2017', points: 1, name: '2017 STEAMWORKS · low boiler', kind: 'slot', x: 0, lateralY: 0, z: 0.5683, width: 0.635, height: 0.22225},
+  {id: 'bottom-port-2020', points: 1, name: '2020 INFINITE RECHARGE · bottom port', kind: 'slot', x: 0, lateralY: 0, z: 0.5842, width: 0.8636, height: 0.254},
+  {id: 'inner-port-2020', points: 1, name: '2020 INFINITE RECHARGE · inner port', kind: 'round-slot', x: 0, lateralY: 0, z: 2.49555, diameter: 0.3302},
+  {id: 'high-goal-2013', points: 3, name: '2013 ULTIMATE ASCENT · high disc slot', kind: 'slot', x: 0, lateralY: 0, z: 2.797, width: 1.3716, height: 0.3048},
+  {id: 'hoop-2012', points: 3, name: '2012 REBOUND RUMBLE · basket (approx.)', kind: 'hoop', x: 0, lateralY: 0, z: 2.4, diameter: 0.4572},
+  {id: 'speaker-2024', points: 2, name: '2024 CRESCENDO · SPEAKER (approx.)', kind: 'slot', x: 0, lateralY: 0, z: 2.0, width: 1.05, height: 0.45},
+  {id: 'amp-2024', points: 1, name: '2024 CRESCENDO · AMP (approx.)', kind: 'slot', x: 0, lateralY: 0, z: 1.2, width: 0.52, height: 0.26},
 ];
 
 export const DEFAULT_PIECE_ID = 'fuel-2026';
@@ -81,7 +81,11 @@ export function validateTarget(target) {
     x: position(target.x, 'X'),
     lateralY: position(target.lateralY, 'Lateral Y'),
     z: positive(target.z, 'Height', 50),
+    points: target.points ?? 1,
   };
+  if (!Number.isInteger(common.points) || common.points < 0 || common.points > 1000) {
+    throw new RangeError('Points must be an integer from 0 to 1000');
+  }
   if (target.kind === 'hub') {
     const topAcrossFlats = positive(target.topAcrossFlats, 'Top across flats', 20);
     const bottomSide = positive(target.bottomSide, 'Bottom hex side', 20);
