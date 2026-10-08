@@ -27,6 +27,8 @@ function interpolate(a, b, fraction) {
   return {
     time: a.time + t * (b.time - a.time),
     state: a.state.map((n, i) => n + t * (b.state[i] - n)),
+    ...(a.normal && b.normal ? {normal: a.normal.map((n,i)=>n+t*(b.normal[i]-n))} : {}),
+    ...(a.orientation && b.orientation ? {orientation: a.orientation.map((n,i)=>n+t*(b.orientation[i]-n))} : {}),
   };
 }
 
@@ -68,7 +70,15 @@ function outsideOrRim(sample, signedClearance, outsideDistance, ballRadius) {
   };
 }
 
-export function classifyTargetInteraction(samples, geometry, ballRadius) {
+function supportRadius(direction, radius, piece, sample) {
+  if (!piece || piece.shape === 'sphere' || !sample.normal) return radius;
+  const n = sample.normal;
+  const dot = Math.max(-1,Math.min(1,direction.reduce((sum,v,i)=>sum+v*n[i],0)));
+  const thickness = piece.thickness ?? piece.diameter * 0.1;
+  return radius * Math.sqrt(Math.max(0,1-dot*dot)) + thickness/2*Math.abs(dot);
+}
+
+export function classifyTargetInteraction(samples, geometry, ballRadius, piece = null) {
   if (!Number.isFinite(ballRadius) || ballRadius <= 0) {
     throw new RangeError('ballRadius must be positive');
   }
@@ -89,28 +99,40 @@ export function classifyTargetInteraction(samples, geometry, ballRadius) {
       ? [sample.state[0] - geometry.x, lateralOffset]
       : [lateralOffset, sample.state[2] - geometry.z];
     const result = polygonClearance(point, geometry.vertices);
-    return outsideOrRim(sample, result.margin - ballRadius, result.distance, ballRadius);
+    const direction = horizontal ? [result.normal[0],result.normal[1],0] : [0,result.normal[0],result.normal[1]];
+    const clearance = supportRadius(direction,ballRadius,piece,sample);
+    return outsideOrRim(sample, result.margin - clearance, result.distance, clearance);
   }
   if (geometry.kind === 'hoop') {
     const radialDistance = Math.hypot(sample.state[0] - geometry.x, lateralOffset);
     const apertureRadius = geometry.diameter / 2;
-    return outsideOrRim(sample, apertureRadius - radialDistance - ballRadius,
-      Math.abs(radialDistance - apertureRadius), ballRadius);
+    const outward = radialDistance > EPS
+      ? [(sample.state[0]-geometry.x)/radialDistance,lateralOffset/radialDistance,0]
+      : [1,0,0];
+    const clearance = supportRadius(outward,ballRadius,piece,sample);
+    return outsideOrRim(sample, apertureRadius - radialDistance - clearance,
+      Math.abs(radialDistance - apertureRadius), clearance);
   }
   const heightOffset = sample.state[2] - geometry.z;
   if (geometry.kind === 'round-slot') {
     const radialDistance = Math.hypot(lateralOffset, heightOffset);
     const apertureRadius = geometry.diameter / 2;
-    return outsideOrRim(sample, apertureRadius - radialDistance - ballRadius,
-      Math.abs(radialDistance - apertureRadius), ballRadius);
+    const outward = radialDistance > EPS
+      ? [0,lateralOffset/radialDistance,heightOffset/radialDistance]
+      : [0,1,0];
+    const clearance = supportRadius(outward,ballRadius,piece,sample);
+    return outsideOrRim(sample, apertureRadius - radialDistance - clearance,
+      Math.abs(radialDistance - apertureRadius), clearance);
   }
   if (geometry.kind === 'slot') {
     const dx = Math.abs(lateralOffset) - geometry.width / 2;
     const dz = Math.abs(heightOffset) - geometry.height / 2;
-    const signedClearance = Math.min(-dx, -dz) - ballRadius;
+    const supportY = supportRadius([0,1,0],ballRadius,piece,sample);
+    const supportZ = supportRadius([0,0,1],ballRadius,piece,sample);
+    const signedClearance = Math.min(-dx - supportY, -dz - supportZ);
     const outsideDistance = Math.hypot(Math.max(0, dx), Math.max(0, dz));
     // A ball inside but too near a rectangular edge is a frame collision.
-    return outsideOrRim(sample, signedClearance, outsideDistance, ballRadius);
+    return outsideOrRim(sample, signedClearance, outsideDistance, Math.max(supportY, supportZ));
   }
   throw new RangeError('Unsupported scoring target kind: ' + geometry.kind);
 }
