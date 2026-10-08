@@ -3,7 +3,9 @@ import {simulateTrajectory2D} from './trajectory2d.js';
 import Toggle from './Toggle.jsx';
 import {createOptimizerClient} from './optimizerClient.js';
 import Trajectory3DView from './Trajectory3DView.jsx';
-import {HUB_DIMENSIONS, createHubGeometry} from './hubGeometry.js';
+import GameSetupPanel from './GameSetupPanel.jsx';
+import {loadLibrary, resolveLibrarySelection} from './gameCatalog.js';
+import {createTargetGeometry, targetSideProfile} from './scoringTargets.js';
 import {applyCalibrationProfile, parseCalibrationProfile} from './calibration.js';
 import AdvancedPhysicsPanel from './AdvancedPhysicsPanel.jsx';
 
@@ -164,19 +166,16 @@ export default function TrajectorySimulator() {
     const [velError, setVelError] = useState(0.5);
     const [angleError, setAngleError] = useState(1.0);
 
-    // Target geometry shared by scoring, 2-D rendering, and 3-D rendering.
-    const targetX = 0;
-    const targetY = HUB_DIMENSIONS.topZ;
-    const hubGeometry = useMemo(() => createHubGeometry({centerX: targetX, centerY: 0}), [targetX]);
-
-    // Game piece (FUEL 2026)
-    // Official range is ~0.203-0.227 kg; use the midpoint until a ball is weighed.
-    const mass = 0.215;
-    const diameter = 0.15;
-    const radius = diameter / 2;
-    // Aerodynamic coefficients are uncalibrated FUEL baselines, not measured constants.
-    const dragCoeff = 0.47;
-    const liftCoeff = 0.25;
+    // All simulations, optimizer workers, and views consume the same active profiles.
+    const [gameSelection, setGameSelection] = useState(() => resolveLibrarySelection(loadLibrary()));
+    const {piece: gamePiece, target: scoringTarget} = gameSelection;
+    const targetX = scoringTarget.x;
+    const targetY = scoringTarget.z;
+    const hubGeometry = useMemo(() => createTargetGeometry(scoringTarget), [scoringTarget]);
+    const mass = gamePiece.mass;
+    const radius = gamePiece.diameter / 2;
+    const dragCoeff = gamePiece.dragCoeff;
+    const liftCoeff = gamePiece.liftCoeff;
     const airDensity = 1.204; // ~20 C, sea level; matches Python default environment
     const gravity = 9.81;
 
@@ -203,12 +202,14 @@ export default function TrajectorySimulator() {
         mass, radius, dragCoeff, liftCoeff, airDensity, gravity,
         enableDrag, enableMagnus,
         targetX,
-        targetLateralY: 0,
+        targetLateralY: scoringTarget.lateralY,
+        target: scoringTarget,
         robotVelocity,
         wind,
     }, calibrationProfile), [
         launchX, launchY, velocity, angle, azimuth, spinRPM, enableDrag, enableMagnus,
-        targetX, robotVelocity, wind, calibrationProfile,
+        targetX, scoringTarget, mass, radius, dragCoeff, liftCoeff,
+        robotVelocity, wind, calibrationProfile,
     ]);
 
     // Run simulation
@@ -279,7 +280,7 @@ export default function TrajectorySimulator() {
     // Ideal angle calculation
     const idealAngle = useMemo(() =>
             computeIdealAngle(launchX, launchY, targetX, targetY, velocity, gravity),
-        [launchX, launchY, velocity]
+        [launchX, launchY, targetX, targetY, velocity]
     );
 
     // Estimated backspin from flywheel params
@@ -346,12 +347,12 @@ export default function TrajectorySimulator() {
         const allX = result.points.map(p => p.x);
         const allY = result.points.map(p => p.y);
         return {
-            xMin: Math.min(launchX - 0.5, ...allX),
-            xMax: Math.max(1.5, ...allX) + 0.5,
+            xMin: Math.min(launchX - 0.5, targetX - 1.5, ...allX),
+            xMax: Math.max(1.5, targetX + 1.5, ...allX) + 0.5,
             yMin: -0.2,
             yMax: Math.max(targetY + 1, result.maxHeight + 0.5)
         };
-    }, [result, launchX, targetY]);
+    }, [result, launchX, targetX, targetY]);
 
     // Convert coordinates to SVG
     const toSVG = useCallback((x, y) => {
@@ -396,18 +397,15 @@ export default function TrajectorySimulator() {
         );
     }, [envelopeResults, toSVG]);
 
-    // Side-profile target visualization from the same HUB geometry used for scoring.
-    const targetVis = useMemo(() => ({
-        center: toSVG(targetX, hubGeometry.topZ),
-        topLeft: toSVG(targetX - hubGeometry.topApothem, hubGeometry.topZ),
-        topRight: toSVG(targetX + hubGeometry.topApothem, hubGeometry.topZ),
-        bottomLeft: toSVG(targetX - hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        bottomRight: toSVG(targetX + hubGeometry.bottomApothem, hubGeometry.bottomZ),
-        topClearLeft: toSVG(targetX - Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        topClearRight: toSVG(targetX + Math.max(0, hubGeometry.topApothem - radius), hubGeometry.topZ),
-        bottomClearLeft: toSVG(targetX - Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-        bottomClearRight: toSVG(targetX + Math.max(0, hubGeometry.bottomApothem - radius), hubGeometry.bottomZ),
-    }), [toSVG, targetX, hubGeometry, radius]);
+    // Side-profile drawing uses the same geometry object as scoring.
+    const targetVis = useMemo(() => {
+        const side = targetSideProfile(hubGeometry, radius);
+        return {
+            center: toSVG(...side.labelPoint),
+            polygon: side.polygon.map((point) => toSVG(...point)),
+            clearances: side.clearances.map((line) => line.map((point) => toSVG(...point))),
+        };
+    }, [toSVG, hubGeometry, radius]);
 
     const hubClassification = result.hubInteraction?.classification ?? 'miss';
     const hubStatus = HUB_STATUS_LABELS[hubClassification] ?? HUB_STATUS_LABELS.miss;
@@ -425,13 +423,14 @@ export default function TrajectorySimulator() {
                         FRC Trajectory Simulator
                     </h1>
                     <p className="text-slate-400 text-sm mt-1">
-                        2026 Season • Air Drag & Magnus Effect Physics
+                        Configurable FRC game pieces, targets • Air Drag & Magnus Effect Physics
                     </p>
                 </div>
 
                 <div className="grid lg:grid-cols-3 gap-4">
                     {/* Controls Panel */}
                     <div className="lg:col-span-1 space-y-4">
+                        <GameSetupPanel onSelectionChange={setGameSelection} disabled={optimizerRunning} />
                         {/* Launch Parameters */}
                         <div className="bg-slate-800/50 backdrop-blur rounded-xl p-4 border border-slate-700">
                             <h2 className="text-lg font-semibold text-indigo-400 mb-3">Launch Parameters</h2>
@@ -599,6 +598,8 @@ export default function TrajectorySimulator() {
                                 unit=""
                                 highlight={result.hitTarget}
                             />
+                            <ResultItem label="Target" value={scoringTarget.name} unit="" />
+                            <ResultItem label="Game piece" value={gamePiece.name} unit="" />
                             <ResultItem label="Flight Time" value={result.flightTime.toFixed(3)} unit="s"/>
                             <ResultItem label="Max Height" value={result.maxHeight.toFixed(2)} unit="m"/>
                             <ResultItem label="Range" value={result.range.toFixed(2)} unit="m"/>
@@ -649,20 +650,14 @@ export default function TrajectorySimulator() {
                                 </defs>
                                 <rect width="600" height="400" fill="url(#grid)"/>
 
-                                {/* Target funnel */}
-                                <path
-                                    d={`M ${targetVis.topLeft.x} ${targetVis.topLeft.y} 
-                      L ${targetVis.bottomLeft.x} ${targetVis.bottomLeft.y}
-                      L ${targetVis.bottomRight.x} ${targetVis.bottomRight.y}
-                      L ${targetVis.topRight.x} ${targetVis.topRight.y}`}
-                                    fill="rgba(34, 197, 94, 0.1)"
-                                    stroke="#22c55e"
-                                    strokeWidth="3"
-                                />
-                                <line x1={targetVis.topClearLeft.x} y1={targetVis.topClearLeft.y} x2={targetVis.topClearRight.x} y2={targetVis.topClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
-                                <line x1={targetVis.bottomClearLeft.x} y1={targetVis.bottomClearLeft.y} x2={targetVis.bottomClearRight.x} y2={targetVis.bottomClearRight.y}
-                                      stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5" />
+                                {/* Target aperture side profile */}
+                                <polyline points={targetVis.polygon.map((p) => p.x + ',' + p.y).join(' ')}
+                                          fill="none" stroke="#22c55e" strokeWidth="3"/>
+                                {targetVis.clearances.map((line, index) => (
+                                    <polyline key={'target-clearance-' + index}
+                                              points={line.map((p) => p.x + ',' + p.y).join(' ')}
+                                              fill="none" stroke="#67e8f9" strokeWidth="1.5" strokeDasharray="5,5"/>
+                                ))}
 
                                 {/* Error envelope */}
                                 {envelopePaths.map((path, i) => (
@@ -728,7 +723,7 @@ export default function TrajectorySimulator() {
                                 {/* Target label */}
                                 <text x={targetVis.center.x} y={targetVis.center.y - 30} fill="white" fontSize="12"
                                       textAnchor="middle" fontWeight="bold">
-                                    Hub
+                                    {scoringTarget.name}
                                 </text>
                             </svg>
                             )}
@@ -750,7 +745,7 @@ export default function TrajectorySimulator() {
                                 </div>
                                 <div className="bg-slate-700/50 rounded p-2">
                                     <div className="text-slate-400">Game Piece</div>
-                                    <div className="text-cyan-400 font-mono">Fuel 2026</div>
+                                    <div className="text-cyan-400 font-mono">{gamePiece.name}</div>
                                 </div>
                             </div>
                         </div>
