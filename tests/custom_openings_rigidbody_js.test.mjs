@@ -11,8 +11,9 @@ const square=[[-0.5,-0.4],[0.5,-0.4],[0.5,0.4],[-0.5,0.4]];
 const custom={id:'custom-poly',name:'Drawn goal',kind:'polygon',plane:'vertical',
   x:0,lateralY:0,z:2,points:3,vertices:square};
 function segment(a,b) {
-  return [{time:0,state:[...a,1,0,1,0,0,0]},
-    {time:1,state:[...b,1,0,1,0,0,0]}];
+  const velocity=a.map((value,i)=>b[i]-value);
+  return [{time:0,state:[...a,...velocity,0,0,0]},
+    {time:1,state:[...b,...velocity,0,0,0]}];
 }
 test('polygon accepts concave contours; rejects self-intersections and zero area',()=>{
   const concave=[[0,0],[2,0],[2,2],[1,1],[0,2]];
