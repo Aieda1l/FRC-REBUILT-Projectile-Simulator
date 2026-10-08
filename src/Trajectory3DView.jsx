@@ -1,5 +1,5 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {hexVertices} from './hubGeometry.js';
+import {targetWireframes} from './scoringTargets.js';
 import {CAMERA_PRESETS, projectTrajectoryGroups} from './trajectory3dProjection.js';
 
 const WIDTH = 600;
@@ -23,23 +23,23 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
   };
 
   const scene = useMemo(() => {
-    const topClearance = hexVertices(Math.max(0.001, hubGeometry.topApothem - ballRadius), hubGeometry.topZ, hubGeometry.centerX, hubGeometry.centerY);
-    const bottomClearance = hexVertices(Math.max(0.001, hubGeometry.bottomApothem - ballRadius), hubGeometry.bottomZ, hubGeometry.centerX, hubGeometry.centerY);
+    const wires = targetWireframes(hubGeometry, ballRadius);
+    const centerX = hubGeometry.kind === 'hub' ? hubGeometry.centerX : hubGeometry.x;
+    const centerY = hubGeometry.kind === 'hub' ? hubGeometry.centerY : hubGeometry.lateralY;
     const trajectory = samples.map((sample) => sample.state.slice(0, 3));
     const ideal = idealSamples.map((sample) => sample.state.slice(0, 3));
     const envelopes = envelopeSamples.map((group) => group.map((sample) => sample.state.slice(0, 3)));
     const axes = [
-      [hubGeometry.centerX, hubGeometry.centerY, 0],
-      [hubGeometry.centerX + 0.6, hubGeometry.centerY, 0],
-      [hubGeometry.centerX, hubGeometry.centerY + 0.6, 0],
-      [hubGeometry.centerX, hubGeometry.centerY, 0.6],
+      [centerX, centerY, 0],
+      [centerX + 0.6, centerY, 0],
+      [centerX, centerY + 0.6, 0],
+      [centerX, centerY, 0.6],
     ];
     const collision = interaction?.collisionPoint?.state?.slice(0, 3) ?? null;
     const context = [
-      ...hubGeometry.topVertices,
-      ...hubGeometry.bottomVertices,
-      ...topClearance,
-      ...bottomClearance,
+      ...wires.frames.flat(),
+      ...wires.clearance.flat(),
+      ...wires.connectors.flat(),
       ...axes,
       ...(collision ? [collision] : []),
     ];
@@ -55,10 +55,9 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
       return chunk;
     };
     return {
-      top: takeContext(6),
-      bottom: takeContext(6),
-      topClearance: takeContext(6),
-      bottomClearance: takeContext(6),
+      frames: wires.frames.map((frame) => takeContext(frame.length)),
+      clearances: wires.clearance.map((frame) => takeContext(frame.length)),
+      connectors: wires.connectors.map((pair) => takeContext(pair.length)),
       axes: takeContext(4),
       collision: collision ? takeContext(1)[0] : null,
       trajectory: projected.actual,
@@ -97,16 +96,16 @@ export default function Trajectory3DView({samples, idealSamples = [], envelopeSa
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full bg-slate-900/80 rounded-lg touch-none"
         onPointerDown={onPointerDown} onPointerMove={onPointerMove}
         onPointerUp={() => { dragRef.current = null; }} onPointerCancel={() => { dragRef.current = null; }}
-        aria-label="3-D trajectory and HUB view">
-        {[0,1,2,3,4,5].map((i) => {
-          const n = (i + 1) % 6;
-          return <polygon key={i} points={pointsAttribute([scene.top[i], scene.top[n], scene.bottom[n], scene.bottom[i]])}
-            fill="rgba(34,197,94,0.06)" stroke="rgba(34,197,94,0.55)" strokeWidth="1.5" />;
-        })}
-        <polygon points={pointsAttribute(scene.top)} fill="none" stroke="#22c55e" strokeWidth="2.5" />
-        <polygon points={pointsAttribute(scene.bottom)} fill="none" stroke="#22c55e" strokeWidth="2" />
-        <polygon points={pointsAttribute(scene.topClearance)} fill="none" stroke="#67e8f9" strokeDasharray="5 4" />
-        <polygon points={pointsAttribute(scene.bottomClearance)} fill="none" stroke="#67e8f9" strokeDasharray="5 4" opacity="0.65" />
+        aria-label="3-D trajectory and scoring target view">
+        {scene.connectors.map((pair, index) => <line key={'connector-' + index}
+          x1={pair[0].x} y1={pair[0].y} x2={pair[1].x} y2={pair[1].y}
+          stroke="rgba(34,197,94,0.55)" strokeWidth="1.5" />)}
+        {scene.frames.map((frame, index) => <polygon key={'frame-' + index}
+          points={pointsAttribute(frame)} fill="rgba(34,197,94,0.06)"
+          stroke="#22c55e" strokeWidth="2.5" />)}
+        {scene.clearances.map((frame, index) => <polygon key={'clearance-' + index}
+          points={pointsAttribute(frame)} fill="none" stroke="#67e8f9"
+          strokeDasharray="5 4" opacity="0.8" />)}
         {scene.envelopes.map((trajectory, index) => (
           trajectory.length > 1 && (
             <polyline
