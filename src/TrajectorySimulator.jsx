@@ -599,6 +599,7 @@ export default function TrajectorySimulator() {
                                 highlight={result.hitTarget}
                             />
                             <ResultItem label="Target" value={scoringTarget.name} unit="" />
+                            <ResultItem label="Shot points" value={result.hitTarget ? scoringTarget.points ?? 1 : 0} unit="" highlight={result.hitTarget} />
                             <ResultItem label="Game piece" value={gamePiece.name} unit="" />
                             <ResultItem label="Flight Time" value={result.flightTime.toFixed(3)} unit="s"/>
                             <ResultItem label="Max Height" value={result.maxHeight.toFixed(2)} unit="m"/>
