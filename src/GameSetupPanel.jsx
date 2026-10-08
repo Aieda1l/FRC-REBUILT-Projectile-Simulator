@@ -1,4 +1,5 @@
 import React, {useEffect, useMemo, useState} from 'react';
+import PolygonOpeningEditor from './PolygonOpeningEditor.jsx';
 import {
   GAME_PIECES, SCORING_TARGETS, PIECE_SHAPES, TARGET_KINDS,
   loadLibrary, newCustomId, resolveLibrarySelection, saveLibrary,
@@ -12,6 +13,7 @@ const kinds = {
   hoop: 'Horizontal circular hoop',
   slot: 'Vertical rectangular slot / hole',
   'round-slot': 'Vertical circular hole',
+  polygon: 'Draw custom opening (polygon)',
 };
 
 function NumericField({label, value, onChange, step = 0.01, min, max}) {
@@ -45,8 +47,18 @@ function PieceEditor({draft, onChange, onSave, onCancel, isNew, disabled}) {
         <NumericField label="Drag coefficient Cd" min={0} value={draft.dragCoeff} onChange={(value) => update('dragCoeff', value)} />
         <NumericField label="Lift coefficient Cl" min={0} value={draft.liftCoeff} onChange={(value) => update('liftCoeff', value)} />
       </div>
+      {draft.shape !== 'sphere' && <div className="grid grid-cols-2 gap-3">
+        <NumericField label="Thickness (m)" min={0.001} value={draft.thickness ?? 0.02} onChange={(value) => update('thickness', value)} />
+        {draft.shape === 'ring' && <NumericField label="Inner diameter (m)" min={0} value={draft.innerDiameter ?? 0.1} onChange={(value) => update('innerDiameter', value)} />}
+        <NumericField label="Initial pitch (°)" step={1} value={draft.pitchDeg ?? 0} onChange={(value) => update('pitchDeg', value)} />
+        <NumericField label="Initial roll (°)" step={1} value={draft.rollDeg ?? 0} onChange={(value) => update('rollDeg', value)} />
+        <NumericField label="Lift slope / rad" value={draft.clAlpha ?? 1.5} onChange={(value) => update('clAlpha', value)} />
+        <NumericField label="Drag slope / rad²" value={draft.cdAlpha ?? 1} onChange={(value) => update('cdAlpha', value)} />
+        <NumericField label="Pitch moment slope" value={draft.cmAlpha ?? 0.05} onChange={(value) => update('cmAlpha', value)} />
+        <NumericField label="Angular damping" value={draft.angularDamping ?? 0.01} onChange={(value) => update('angularDamping', value)} />
+      </div>}
       {draft.shape !== 'sphere' && <p className="text-xs text-amber-300" role="note">
-        Disc and ring flight is a sphere-equivalent approximation. The simulator does not model orientation, tumbling, or non-spherical opening clearance.
+        Disc/ring physics are a preliminary rigid-body approximation. Coefficients need measurement for credible predictions; deformable foam rings and rim rebounds are not modeled.
       </p>}
       <div className="flex gap-2">
         <button className={buttonClass + ' border-cyan-500 text-cyan-200'} disabled={disabled} type="submit">Save game piece</button>
@@ -59,7 +71,11 @@ function PieceEditor({draft, onChange, onSave, onCancel, isNew, disabled}) {
 function TargetEditor({draft, onChange, onSave, onCancel, isNew, disabled}) {
   const update = (key, value) => onChange((current) => ({...current, [key]: value}));
   const setKind = (kind) => {
-    const template = SCORING_TARGETS.find((target) => target.kind === kind);
+    const template = SCORING_TARGETS.find((target) => target.kind === kind) ?? {
+      kind: 'polygon', plane: 'vertical',
+      vertices: [[-0.5,-0.3],[0.5,-0.3],[0.5,0.3],[-0.5,0.3]],
+      points: 1,
+    };
     onChange((current) => ({
       ...template, id: current.id, name: current.name, x: current.x,
       lateralY: current.lateralY, z: current.z,
@@ -97,6 +113,17 @@ function TargetEditor({draft, onChange, onSave, onCancel, isNew, disabled}) {
           <NumericField label="Opening height (m)" min={0.001} value={draft.height} onChange={(value) => update('height', value)} />
         </>}
       </div>
+      {draft.kind === 'polygon' && <div className="col-span-2 space-y-3">
+        <label className="block text-xs text-slate-300">Opening plane
+          <select className={fieldClass} value={draft.plane}
+            onChange={(event) => update('plane', event.target.value)}>
+            <option value="vertical">Vertical (forward-facing)</option>
+            <option value="horizontal">Horizontal (downward-facing)</option>
+          </select>
+        </label>
+        <PolygonOpeningEditor vertices={draft.vertices ?? []}
+          onChange={(vertices) => update('vertices', vertices)} />
+      </div>}
       <p className="text-xs text-slate-400">
         Hoops score on downward passage through a horizontal rim. Holes/slots score while traveling forward (+X) through a vertical opening. The ball must clear the opening with its radius.
       </p>
@@ -248,7 +275,7 @@ export default function GameSetupPanel({onSelectionChange, disabled = false}) {
           onSave={saveTarget} onCancel={() => setEditTarget(false)} disabled={disabled} />}
       </div>
       {selection.piece.shape !== 'sphere' &&
-        <p className="text-xs text-amber-300">Non-spherical pieces use a sphere-equivalent flight and clearance approximation; do not use for final shooter design without calibration.</p>}
+        <p className="text-xs text-amber-300">Non-spherical pieces use experimental rigid-body approximations and orientation-aware clearance; calibrate coefficients and account for foam deformation before making shooter decisions.</p>}
       {message && <p role="status" className="text-xs text-cyan-300">{message}</p>}
     </section>
   );
