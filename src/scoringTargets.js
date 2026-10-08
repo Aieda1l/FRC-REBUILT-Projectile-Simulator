@@ -1,5 +1,6 @@
 import {classifyHubInteraction, createHubGeometry, hexVertices} from './hubGeometry.js';
 import {SCORING_TARGETS, validateTarget} from './gameCatalog.js';
+import {polygonClearance} from './polygonGeometry.js';
 
 const EPS = 1e-10;
 
@@ -72,7 +73,7 @@ export function classifyTargetInteraction(samples, geometry, ballRadius) {
     throw new RangeError('ballRadius must be positive');
   }
   if (geometry.kind === 'hub') return classifyHubInteraction(samples, geometry, ballRadius);
-  const horizontal = geometry.kind === 'hoop';
+  const horizontal = geometry.kind === 'hoop' || (geometry.kind === 'polygon' && geometry.plane === 'horizontal');
   const sample = horizontal
     ? crossing(samples, 2, geometry.z, -1)
     : crossing(samples, 0, geometry.x, 1);
@@ -83,6 +84,13 @@ export function classifyTargetInteraction(samples, geometry, ballRadius) {
     };
   }
   const lateralOffset = sample.state[1] - geometry.lateralY;
+  if (geometry.kind === 'polygon') {
+    const point = horizontal
+      ? [sample.state[0] - geometry.x, lateralOffset]
+      : [lateralOffset, sample.state[2] - geometry.z];
+    const result = polygonClearance(point, geometry.vertices);
+    return outsideOrRim(sample, result.margin - ballRadius, result.distance, ballRadius);
+  }
   if (geometry.kind === 'hoop') {
     const radialDistance = Math.hypot(sample.state[0] - geometry.x, lateralOffset);
     const apertureRadius = geometry.diameter / 2;
@@ -127,6 +135,12 @@ function rectangleVertices(geometry, width, height) {
 }
 
 export function targetWireframes(geometry, radius) {
+  if (geometry.kind === 'polygon') {
+    const frame = geometry.vertices.map(([u, v]) => geometry.plane === 'horizontal'
+      ? [geometry.x + u, geometry.lateralY + v, geometry.z]
+      : [geometry.x, geometry.lateralY + u, geometry.z + v]);
+    return {frames: [frame], clearance: [], connectors: []};
+  }
   if (geometry.kind === 'hub') {
     return {
       frames: [geometry.topVertices, geometry.bottomVertices],
@@ -160,6 +174,11 @@ export function targetWireframes(geometry, radius) {
 // Orthographic side view: y is suppressed; for vertical targets show their height
 // at the goal plane, for horizontal targets show the diameter at their rim height.
 export function targetSideProfile(geometry, radius) {
+  if (geometry.kind === 'polygon') {
+    const projected = geometry.vertices.map(([u, v]) => geometry.plane === 'horizontal'
+      ? [geometry.x + u, geometry.z] : [geometry.x, geometry.z + v]);
+    return {polygon: projected, clearances: [], labelPoint: [geometry.x, geometry.z]};
+  }
   if (geometry.kind === 'hub') {
     return {
       polygon: [
