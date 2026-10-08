@@ -6,6 +6,7 @@ import Trajectory3DView from './Trajectory3DView.jsx';
 import GameSetupPanel from './GameSetupPanel.jsx';
 import {loadLibrary, resolveLibrarySelection} from './gameCatalog.js';
 import {createTargetGeometry, targetSideProfile} from './scoringTargets.js';
+import {gamePieceWireframe} from './gamePieceGeometry.js';
 import {applyCalibrationProfile, parseCalibrationProfile} from './calibration.js';
 import AdvancedPhysicsPanel from './AdvancedPhysicsPanel.jsx';
 
@@ -133,6 +134,7 @@ export default function TrajectorySimulator() {
     const [showIdeal, setShowIdeal] = useState(true);
     const [showEnvelope, setShowEnvelope] = useState(true);
     const [viewMode, setViewMode] = useState('2d');
+    const [playbackIndex, setPlaybackIndex] = useState(0);
 
     // Advanced calibrated physics
     const [robotVelocity, setRobotVelocity] = useState([0, 0, 0]);
@@ -408,6 +410,30 @@ export default function TrajectorySimulator() {
         };
     }, [toSVG, hubGeometry, radius]);
 
+    const activeSample = result.samples3d[Math.min(playbackIndex, result.samples3d.length - 1)];
+    const pieceVis = useMemo(() => {
+        if (!activeSample) return {lines: [], points: []};
+        const wire = gamePieceWireframe(gamePiece, activeSample.state.slice(0, 3), activeSample.orientation);
+        return {
+            lines: wire.lines.map((line) => line.map(([x,,z]) => toSVG(x,z))),
+            points: wire.points.map((line) => line.map(([x,,z]) => toSVG(x,z))),
+        };
+    }, [activeSample, gamePiece, toSVG]);
+    const centerNearTarget = () => {
+        const crossing = result.hubInteraction?.topCrossing;
+        if (!crossing) return;
+        let nearest=0, delta=Infinity;
+        result.samples3d.forEach((sample,index)=>{
+            const d=Math.abs(sample.time-crossing.time);
+            if (d<delta) {delta=d; nearest=index;}
+        });
+        setPlaybackIndex(nearest);
+    };
+    const clearance = result.hubInteraction?.clearanceMargin;
+    const clearanceLabel = Number.isFinite(clearance)
+        ? `${clearance >= 0 ? '+' : ''}${(clearance * 100).toFixed(1)} cm`
+        : 'N/A';
+
     const hubClassification = result.hubInteraction?.classification ?? 'miss';
     const hubStatus = HUB_STATUS_LABELS[hubClassification] ?? HUB_STATUS_LABELS.miss;
     const cleanEntry = hubClassification === 'clean-entry';
@@ -641,6 +667,7 @@ export default function TrajectorySimulator() {
                                     hubGeometry={hubGeometry}
                                     interaction={result.hubInteraction}
                                     ballRadius={radius}
+                                    gamePiece={gamePiece}
                                 />
                             ) : (
                             <svg viewBox="0 0 600 400" className="w-full h-auto bg-slate-900/50 rounded-lg">
@@ -674,6 +701,17 @@ export default function TrajectorySimulator() {
 
                                 {/* Main trajectory */}
                                 <path d={trajectoryPath} fill="none" stroke="#818cf8" strokeWidth="3"/>
+
+                                {/* Game-piece outline at selected trajectory sample, scaled in meters */}
+                                {pieceVis.lines.map((line,i) => (
+                                    <polygon key={'piece-line-'+i} points={line.map(p=>p.x+','+p.y).join(' ')}
+                                             stroke="#fbbf24" strokeWidth="1.8"
+                                             fill={i===0 ? 'rgba(251,191,36,0.12)' : 'none'}/>
+                                ))}
+                                {pieceVis.points.map((line,i) => (
+                                    <polyline key={'piece-edge-'+i} points={line.map(p=>p.x+','+p.y).join(' ')}
+                                              fill="none" stroke="#f59e0b" strokeWidth="1.3"/>
+                                ))}
 
                                 {/* Launch point */}
                                 <circle cx={launchVis.x} cy={launchVis.y} r="8" fill="#ef4444" stroke="white"
@@ -729,6 +767,21 @@ export default function TrajectorySimulator() {
                                 </text>
                             </svg>
                             )}
+
+                            {viewMode === '2d' && <label className="block mt-3 text-xs text-slate-400">
+                                Game-piece position along trajectory
+                                <input type="range" className="w-full mt-1 accent-amber-400" min="0"
+                                    max={Math.max(0,result.samples3d.length-1)} value={Math.min(playbackIndex,result.samples3d.length-1)}
+                                    onChange={(event)=>setPlaybackIndex(Number(event.target.value))}/>
+                            </label>}
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                                <button type="button" className="border border-slate-600 px-2 py-1 rounded hover:border-cyan-400"
+                                    onClick={centerNearTarget} disabled={!result.hubInteraction?.topCrossing}>
+                                    Inspect goal crossing
+                                </button>
+                                <span>Edge clearance: <strong className={clearance >= 0 ? 'text-green-300' : 'text-amber-300'}>{clearanceLabel}</strong></span>
+                                <span className="text-amber-200">Amber = actual-size {gamePiece.shape} ({(gamePiece.diameter*100).toFixed(1)} cm)</span>
+                            </div>
 
                             {/* Info bar */}
                             <div className="mt-3 grid grid-cols-4 gap-2 text-center text-xs">
