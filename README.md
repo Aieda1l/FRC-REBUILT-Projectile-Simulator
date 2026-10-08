@@ -83,8 +83,8 @@ frc-simulator/
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/your-username/frc-trajectory-simulator.git
-cd frc-trajectory-simulator
+git clone https://github.com/Aieda1l/FRC-REBUILT-Projectile-Simulator.git
+cd FRC-REBUILT-Projectile-Simulator
 
 # Install Frontend Dependencies
 npm install
