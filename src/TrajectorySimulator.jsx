@@ -135,6 +135,8 @@ export default function TrajectorySimulator() {
     const [showEnvelope, setShowEnvelope] = useState(true);
     const [viewMode, setViewMode] = useState('2d');
     const [playbackIndex, setPlaybackIndex] = useState(0);
+    const [playbackRunning, setPlaybackRunning] = useState(false);
+    const [playbackSpeed, setPlaybackSpeed] = useState(0.25);
 
     // Advanced calibrated physics
     const [robotVelocity, setRobotVelocity] = useState([0, 0, 0]);
@@ -409,6 +411,15 @@ export default function TrajectorySimulator() {
             clearances: side.clearances.map((line) => line.map((point) => toSVG(...point))),
         };
     }, [toSVG, hubGeometry, radius]);
+
+    useEffect(() => {
+        if (!playbackRunning || viewMode !== '2d' || playbackIndex >= result.samples3d.length-1) return;
+        const dt = result.samples3d.length > 1
+            ? Math.max(1e-5, result.samples3d[1].time - result.samples3d[0].time) : 0.01;
+        const advance = Math.max(1, Math.round(0.033 * playbackSpeed / dt));
+        const timer = setInterval(() => setPlaybackIndex((i)=>Math.min(result.samples3d.length-1,i+advance)),33);
+        return () => clearInterval(timer);
+    }, [playbackRunning, playbackSpeed, playbackIndex, result.samples3d, viewMode]);
 
     const activeSample = result.samples3d[Math.min(playbackIndex, result.samples3d.length - 1)];
     const pieceVis = useMemo(() => {
@@ -768,12 +779,25 @@ export default function TrajectorySimulator() {
                             </svg>
                             )}
 
-                            {viewMode === '2d' && <label className="block mt-3 text-xs text-slate-400">
-                                Game-piece position along trajectory
-                                <input type="range" className="w-full mt-1 accent-amber-400" min="0"
-                                    max={Math.max(0,result.samples3d.length-1)} value={Math.min(playbackIndex,result.samples3d.length-1)}
-                                    onChange={(event)=>setPlaybackIndex(Number(event.target.value))}/>
-                            </label>}
+                            {viewMode === '2d' && <div className="mt-3 space-y-2">
+                                <label className="block text-xs text-slate-400">
+                                    Game-piece position along trajectory
+                                    <input type="range" className="w-full mt-1 accent-amber-400" min="0"
+                                        max={Math.max(0,result.samples3d.length-1)} value={Math.min(playbackIndex,result.samples3d.length-1)}
+                                        onChange={(event)=>setPlaybackIndex(Number(event.target.value))}/>
+                                </label>
+                                <div className="flex items-center gap-2 text-xs text-slate-300">
+                                    <button type="button" className="border border-slate-600 rounded px-2 py-1"
+                                        onClick={()=>{if(!playbackRunning && playbackIndex>=result.samples3d.length-1)setPlaybackIndex(0);setPlaybackRunning(v=>!v);}}>
+                                        {playbackRunning && playbackIndex<result.samples3d.length-1 ? 'Pause playback' : 'Play trajectory'}
+                                    </button>
+                                    <label>Speed <select value={playbackSpeed}
+                                        className="bg-slate-900 border border-slate-600 rounded p-1"
+                                        onChange={(event)=>setPlaybackSpeed(Number(event.target.value))}>
+                                        {[0.25,0.5,1,2].map(v=><option key={v} value={v}>{v}×</option>)}
+                                    </select></label>
+                                </div>
+                            </div>}
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-300">
                                 <button type="button" className="border border-slate-600 px-2 py-1 rounded hover:border-cyan-400"
                                     onClick={centerNearTarget} disabled={!result.hubInteraction?.topCrossing}>
